@@ -1,0 +1,17 @@
+# The following manifests contain a metrics certificate CR.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  labels:
+    app.kubernetes.io/name: elemental-lifecycle-manager
+    app.kubernetes.io/managed-by: kustomize
+  name: metrics-certs
+  namespace: system
+spec:
+  dnsNames:
+  - controller-manager-metrics-service.system.svc
+  - controller-manager-metrics-service.system.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: selfsigned-issuer
+  secretName: metrics-server-cert
