@@ -20,52 +20,198 @@ package v1alpha1
 import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/apimachinery/pkg/api/meta"
+
+	// +kubebuilder:scaffold:imports
 
 	lifecyclev1alpha1 "github.com/suse/elemental-lifecycle-manager/api/v1alpha1"
-	// TODO (user): Add any additional imports if needed
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var _ = Describe("Release Webhook", func() {
-	var (
-		obj       *lifecyclev1alpha1.Release
-		oldObj    *lifecyclev1alpha1.Release
-		validator ReleaseCustomValidator
-	)
+	Context("When creating Release under Validating Webhook", Ordered, func() {
+		It("Should be denied if registry is not specified", func() {
+			release := &lifecyclev1alpha1.Release{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "release",
+					Namespace: "default",
+				},
+			}
 
-	BeforeEach(func() {
-		obj = &lifecyclev1alpha1.Release{}
-		oldObj = &lifecyclev1alpha1.Release{}
-		validator = ReleaseCustomValidator{}
-		Expect(validator).NotTo(BeNil(), "Expected validator to be initialized")
-		Expect(oldObj).NotTo(BeNil(), "Expected oldObj to be initialized")
-		Expect(obj).NotTo(BeNil(), "Expected obj to be initialized")
+			err := k8sClient.Create(ctx, release)
+			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("release registry is required")))
+		})
+
+		It("Should be denied if release version is not specified", func() {
+			release := &lifecyclev1alpha1.Release{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "release",
+					Namespace: "default",
+				},
+				Spec: lifecyclev1alpha1.ReleaseSpec{
+					Registry: "registry.example.com",
+				},
+			}
+
+			err := k8sClient.Create(ctx, release)
+			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("release version is required")))
+		})
+
+		It("Should be denied if release version is not in semantic format", func() {
+			release := &lifecyclev1alpha1.Release{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "release",
+					Namespace: "default",
+				},
+				Spec: lifecyclev1alpha1.ReleaseSpec{
+					Registry: "registry.example.com",
+					Version:  "v1",
+				},
+			}
+
+			err := k8sClient.Create(ctx, release)
+			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("'v1' is not a semantic version")))
+		})
+
+		It("Should admit if all required fields are provided", func() {
+			release := &lifecyclev1alpha1.Release{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "release",
+					Namespace: "default",
+				},
+				Spec: lifecyclev1alpha1.ReleaseSpec{
+					Registry: "registry.example.com",
+					Version:  "0.5.0",
+				},
+			}
+
+			Expect(k8sClient.Create(ctx, release)).To(Succeed())
+		})
+
+		It("Should be denied if release already exists", func() {
+			release := &lifecyclev1alpha1.Release{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "release2",
+					Namespace: "default",
+				},
+				Spec: lifecyclev1alpha1.ReleaseSpec{
+					Registry: "registry.example.com",
+					Version:  "0.5.0",
+				},
+			}
+
+			err := k8sClient.Create(ctx, release)
+			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("cannot create release release2. The cluster has an already created Release object: default/release")))
+		})
 	})
 
-	AfterEach(func() {
-		// TODO (user): Add any teardown logic common to all tests
+	Context("When updating Release under Validating Webhook", Ordered, func() {
+		var release *lifecyclev1alpha1.Release
+
+		BeforeEach(func() {
+			release = &lifecyclev1alpha1.Release{}
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "release", Namespace: "default"}, release)).To(Succeed())
+		})
+
+		It("Should be denied if release registry is not specified", func() {
+			release.Spec.Registry = ""
+
+			err := k8sClient.Update(ctx, release)
+			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("release registry is required")))
+		})
+
+		It("Should be denied if release version is not specified", func() {
+			release.Spec.Version = ""
+
+			err := k8sClient.Update(ctx, release)
+			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("release version is required")))
+		})
+
+		It("Should be denied when an upgrade is pending", func() {
+			condition := metav1.Condition{Type: lifecyclev1alpha1.ConditionApplied, Status: metav1.ConditionFalse, Reason: lifecyclev1alpha1.UpgradePending}
+
+			meta.SetStatusCondition(&release.Status.Conditions, condition)
+			Expect(k8sClient.Status().Update(ctx, release)).To(Succeed())
+
+			err := k8sClient.Update(ctx, release)
+			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("cannot edit while upgrade is in 'Pending' state")))
+		})
+
+		It("Should be denied when an upgrade is in progress", func() {
+			condition := metav1.Condition{Type: lifecyclev1alpha1.ConditionApplied, Status: metav1.ConditionFalse, Reason: lifecyclev1alpha1.UpgradeInProgress}
+
+			meta.SetStatusCondition(&release.Status.Conditions, condition)
+			Expect(k8sClient.Status().Update(ctx, release)).To(Succeed())
+
+			err := k8sClient.Update(ctx, release)
+			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("cannot edit while upgrade is in 'InProgress' state")))
+		})
+
+		It("Should pass if the last update has failed, but finished", func() {
+			condition := metav1.Condition{Type: lifecyclev1alpha1.ConditionApplied, Status: metav1.ConditionFalse, Reason: lifecyclev1alpha1.UpgradeFailed}
+
+			meta.SetStatusCondition(&release.Status.Conditions, condition)
+			Expect(k8sClient.Status().Update(ctx, release)).To(Succeed())
+
+			Expect(k8sClient.Update(ctx, release)).To(Succeed())
+		})
+
+		It("Should be denied if release version is not in semantic format", func() {
+			release.Spec.Version = "v1"
+
+			err := k8sClient.Update(ctx, release)
+			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("'v1' is not a semantic version")))
+		})
+
+		It("Should be denied if the new release version is the same as the last applied one", func() {
+			release.Status.Version = "1.0.0"
+			Expect(k8sClient.Status().Update(ctx, release)).To(Succeed())
+
+			err := k8sClient.Update(ctx, release)
+			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("new version must be greater than the currently applied one ('1.0.0')")))
+		})
+
+		It("Should be denied if the new release version is lower than the last applied one", func() {
+			release.Spec.Version = "0.6.0"
+			err := k8sClient.Update(ctx, release)
+			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("new version must be greater than the currently applied one ('1.0.0')")))
+		})
+
+		It("Should pass if the new release version is higher than the last applied one", func() {
+			release.Spec.Version = "1.0.1"
+			Expect(k8sClient.Update(ctx, release)).To(Succeed())
+		})
 	})
 
-	Context("When creating or updating Release under Validating Webhook", func() {
-		// TODO (user): Add logic for validating webhooks
-		// Example:
-		// It("Should deny creation if a required field is missing", func() {
-		//     By("simulating an invalid creation scenario")
-		//     obj.SomeRequiredField = ""
-		//     Expect(validator.ValidateCreate(ctx, obj)).Error().To(HaveOccurred())
-		// })
-		//
-		// It("Should admit creation if all required fields are present", func() {
-		//     By("simulating an invalid creation scenario")
-		//     obj.SomeRequiredField = "valid_value"
-		//     Expect(validator.ValidateCreate(ctx, obj)).To(BeNil())
-		// })
-		//
-		// It("Should validate updates correctly", func() {
-		//     By("simulating a valid update scenario")
-		//     oldObj.SomeRequiredField = "updated_value"
-		//     obj.SomeRequiredField = "updated_value"
-		//     Expect(validator.ValidateUpdate(ctx, oldObj, obj)).To(BeNil())
-		// })
+	Context("When deleting Release under Validating Webhook", Ordered, func() {
+		release := &lifecyclev1alpha1.Release{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "release",
+				Namespace: "default",
+			},
+			Spec: lifecyclev1alpha1.ReleaseSpec{
+				Registry: "registry.example.com",
+				Version:  "1.0.0",
+			},
+		}
+
+		It("Should be denied", func() {
+			err := k8sClient.Delete(ctx, release)
+			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("deleting release objects is not allowed")))
+		})
 	})
 
 })
