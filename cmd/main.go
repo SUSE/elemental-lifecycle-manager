@@ -173,7 +173,7 @@ func main() {
 	}
 	// nolint:goconst
 	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
-		if err := webhookv1alpha1.SetupReleaseWebhookWithManager(mgr); err != nil {
+		if err := webhookv1alpha1.SetupWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "Failed to create webhook", "webhook", "Release")
 			os.Exit(1)
 		}
