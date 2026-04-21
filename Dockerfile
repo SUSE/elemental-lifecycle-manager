@@ -23,6 +23,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o ma
 
 FROM scratch
 WORKDIR /
+COPY --from=builder /etc/ssl/ca-bundle.pem /etc/ssl/ca-bundle.pem
 COPY --from=builder /workspace/manager .
 USER 65532:65532
 
