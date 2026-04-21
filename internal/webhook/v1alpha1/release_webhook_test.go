@@ -74,7 +74,7 @@ var _ = Describe("Release Webhook", func() {
 
 			err := k8sClient.Create(ctx, release)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(MatchError(ContainSubstring("'v1' is not a semantic version")))
+			Expect(err).To(MatchError(ContainSubstring("\"v1\" is not a semantic version")))
 		})
 
 		It("Should admit if all required fields are provided", func() {
@@ -170,7 +170,7 @@ var _ = Describe("Release Webhook", func() {
 
 			err := k8sClient.Update(ctx, release)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(MatchError(ContainSubstring("'v1' is not a semantic version")))
+			Expect(err).To(MatchError(ContainSubstring("\"v1\" is not a semantic version")))
 		})
 
 		It("Should be denied if the new release version is the same as the last applied one", func() {
