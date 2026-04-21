@@ -38,6 +38,7 @@ import (
 
 	lifecyclev1alpha1 "github.com/suse/elemental-lifecycle-manager/api/v1alpha1"
 	"github.com/suse/elemental-lifecycle-manager/internal/controller"
+	"github.com/suse/elemental-lifecycle-manager/internal/release"
 	webhookv1alpha1 "github.com/suse/elemental-lifecycle-manager/internal/webhook/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
@@ -165,8 +166,9 @@ func main() {
 	}
 
 	if err := (&controller.ReleaseReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		RetrieveManifest: release.RetrieveManifest,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Release")
 		os.Exit(1)
