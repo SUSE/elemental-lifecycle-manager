@@ -36,7 +36,7 @@ import (
 // log is for logging in this package.
 var releaselog = logf.Log.WithName("release-resource")
 
-// SetupReleaseWebhookWithManager registers the webhook for Release in the manager.
+// SetupWebhookWithManager registers the webhook for Release in the manager.
 func SetupWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr, &lifecyclev1alpha1.Release{}).
 		WithValidator(&ReleaseValidator{client: mgr.GetClient()}).
@@ -144,7 +144,7 @@ func validateReleaseVersion(releaseVersion string) (*version.Version, error) {
 
 	v, err := version.Parse(releaseVersion)
 	if err != nil {
-		return nil, fmt.Errorf("'%s' is not a semantic version", releaseVersion)
+		return nil, fmt.Errorf("%q is not a semantic version", releaseVersion)
 	}
 
 	return v, nil
