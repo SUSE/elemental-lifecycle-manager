@@ -20,6 +20,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -31,6 +32,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	lifecyclev1alpha1 "github.com/suse/elemental-lifecycle-manager/api/v1alpha1"
+	manifestCache "github.com/suse/elemental-lifecycle-manager/internal/release"
+	"github.com/suse/elemental/v3/pkg/manifest/resolver"
 )
 
 const requeueInterval = 30 * time.Second
@@ -39,6 +42,8 @@ const requeueInterval = 30 * time.Second
 type ReleaseReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+
+	RetrieveManifest func(ctx context.Context, registry, version string) (*resolver.ResolvedManifest, error)
 }
 
 // +kubebuilder:rbac:groups=lifecycle.suse.com,resources=releases,verbs=get;list;watch;create;update;patch;delete
@@ -102,7 +107,14 @@ func (r *ReleaseReconciler) reconcileNormal(ctx context.Context, release *lifecy
 	}
 
 	// TODO: update 'Applied' condition
-	// TODO: retrieve release manifest
+
+	_, err := r.getOrRetrieveManifest(ctx, release)
+	if err != nil {
+		// TODO: Set manifest failed condition
+		return ctrl.Result{}, fmt.Errorf("retrieving release manifest: %w", err)
+	}
+
+	// TODO: Set manifest succeeded condition
 	// TODO: parse configuration options from manifest
 	// TODO: call upgrade specific reconcilers
 	// TODO: update necessary conditions
@@ -122,6 +134,32 @@ func (r *ReleaseReconciler) updateReleaseStatus(ctx context.Context, name types.
 		latest.Status = *status.DeepCopy()
 		return r.Status().Update(ctx, latest)
 	})
+}
+
+// getOrRetrieveManifest returns a cached manifest or fetches it from the registry.
+func (r *ReleaseReconciler) getOrRetrieveManifest(ctx context.Context, release *lifecyclev1alpha1.Release) (*resolver.ResolvedManifest, error) {
+	logger := log.FromContext(ctx)
+	cache := &manifestCache.ManifestCache{Client: r.Client}
+
+	manifest, err := cache.Get(ctx, release.Namespace, release.Spec.Version)
+	if err != nil {
+		logger.Error(err, "Failed to get cached manifest, will fetch from registry")
+	}
+	if manifest != nil {
+		logger.Info("Using cached release manifest", "version", release.Spec.Version)
+		return manifest, nil
+	}
+
+	manifest, err = r.RetrieveManifest(ctx, release.Spec.Registry, release.Spec.Version)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := cache.Set(ctx, release.Namespace, release.Spec.Version, manifest); err != nil {
+		logger.Error(err, "Failed to cache manifest, continuing without caching")
+	}
+
+	return manifest, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
