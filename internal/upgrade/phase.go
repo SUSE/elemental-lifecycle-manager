@@ -39,7 +39,7 @@ func (p Phase) ConditionType() string {
 	return string(p) + "Upgraded"
 }
 
-// SkippedStatus retruns a skipped status for the given phase.
+// SkippedStatus returns a skipped status for the given phase.
 func (p Phase) SkippedStatus() *PhaseStatus {
 	return &PhaseStatus{
 		State:   lifecyclev1alpha1.UpgradeSkipped,
