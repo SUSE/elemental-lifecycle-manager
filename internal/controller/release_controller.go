@@ -32,7 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	lifecyclev1alpha1 "github.com/suse/elemental-lifecycle-manager/api/v1alpha1"
-	manifestCache "github.com/suse/elemental-lifecycle-manager/internal/release"
+	releasecache "github.com/suse/elemental-lifecycle-manager/internal/release"
 	"github.com/suse/elemental/v3/pkg/manifest/resolver"
 )
 
@@ -139,7 +139,7 @@ func (r *ReleaseReconciler) updateReleaseStatus(ctx context.Context, name types.
 // getOrRetrieveManifest returns a cached manifest or fetches it from the registry.
 func (r *ReleaseReconciler) getOrRetrieveManifest(ctx context.Context, release *lifecyclev1alpha1.Release) (*resolver.ResolvedManifest, error) {
 	logger := log.FromContext(ctx)
-	cache := &manifestCache.ManifestCache{Client: r.Client}
+	cache := &releasecache.ManifestCache{Client: r.Client}
 
 	manifest, err := cache.Get(ctx, release.Namespace, release.Spec.Version)
 	if err != nil {
