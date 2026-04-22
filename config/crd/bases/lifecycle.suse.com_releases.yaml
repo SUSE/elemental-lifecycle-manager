@@ -39,6 +39,10 @@ spec:
           spec:
             description: spec defines the desired state of Release
             properties:
+              disableDrain:
+                description: DisableDrain specifies whether nodes drain should be
+                  disabled.
+                type: boolean
               registry:
                 description: Registry specifies an OCI registry to fetch release metadata
                   from.

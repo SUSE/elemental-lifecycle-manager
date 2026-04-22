@@ -63,6 +63,9 @@ type ReleaseSpec struct {
 	Version string `json:"version"`
 	// Registry specifies an OCI registry to fetch release metadata from.
 	Registry string `json:"registry"`
+	// DisableDrain specifies whether nodes drain should be disabled.
+	// +optional
+	DisableDrain bool `json:"disableDrain"`
 }
 
 // ReleaseStatus defines the observed state of Release
