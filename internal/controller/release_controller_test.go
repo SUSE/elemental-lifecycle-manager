@@ -22,6 +22,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -29,57 +30,84 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	lifecyclev1alpha1 "github.com/suse/elemental-lifecycle-manager/api/v1alpha1"
+	"github.com/suse/elemental-lifecycle-manager/internal/upgrade"
+	"github.com/suse/elemental/v3/pkg/manifest/api"
+	"github.com/suse/elemental/v3/pkg/manifest/api/core"
+	"github.com/suse/elemental/v3/pkg/manifest/resolver"
 )
 
 var _ = Describe("Release Controller", func() {
 	Context("When reconciling a resource", func() {
 		const resourceName = "test-resource"
+		var typeNamespacedName types.NamespacedName
+		var defaultCtx context.Context
+		var defaultManifestRetrieve func(ctx context.Context, registry, version string) (*resolver.ResolvedManifest, error)
+		var defaultPipeline *upgrade.Pipeline
+		var defaultReconciler *ReleaseReconciler
+		var defaultRelease *lifecyclev1alpha1.Release
 
-		ctx := context.Background()
-
-		typeNamespacedName := types.NamespacedName{
-			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
-		}
 		release := &lifecyclev1alpha1.Release{}
 
 		BeforeEach(func() {
 			By("creating the custom resource for the Kind Release")
-			err := k8sClient.Get(ctx, typeNamespacedName, release)
+			defaultCtx = context.Background()
+			typeNamespacedName = types.NamespacedName{
+				Name:      resourceName,
+				Namespace: "default",
+			}
+
+			defaultRelease = &lifecyclev1alpha1.Release{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: "default",
+				},
+				Spec: lifecyclev1alpha1.ReleaseSpec{
+					Version:  "0.0.0",
+					Registry: "https://foo.bar.com",
+				}}
+
+			err := k8sClient.Get(defaultCtx, typeNamespacedName, release)
 			if err != nil && errors.IsNotFound(err) {
-				resource := &lifecyclev1alpha1.Release{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
+				Expect(k8sClient.Create(defaultCtx, defaultRelease)).To(Succeed())
+			}
+
+			defaultManifestRetrieve = func(_ context.Context, _, _ string) (*resolver.ResolvedManifest, error) { //nolint:unparam
+
+				return &resolver.ResolvedManifest{
+					CorePlatform: &core.ReleaseManifest{
+						Metadata: &api.Metadata{},
+						Components: core.Components{
+							OperatingSystem: &core.OperatingSystem{},
+							Kubernetes:      &core.Kubernetes{},
+						},
 					},
-					// TODO(user): Specify other spec details if needed.
-				}
-				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+				}, nil
+			}
+
+			defaultPipeline = upgrade.NewPipeline()
+
+			defaultReconciler = &ReleaseReconciler{
+				Client:           k8sClient,
+				Scheme:           k8sClient.Scheme(),
+				RetrieveManifest: defaultManifestRetrieve,
+				Pipeline:         defaultPipeline,
 			}
 		})
 
 		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
 			resource := &lifecyclev1alpha1.Release{}
-			err := k8sClient.Get(ctx, typeNamespacedName, resource)
+			err := k8sClient.Get(defaultCtx, typeNamespacedName, resource)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Cleanup the specific resource instance Release")
-			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			Expect(k8sClient.Delete(defaultCtx, resource)).To(Succeed())
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
-			controllerReconciler := &ReleaseReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
-
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+			_, err := defaultReconciler.Reconcile(defaultCtx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
 		})
 	})
 })
