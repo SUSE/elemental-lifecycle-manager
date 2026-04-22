@@ -33,7 +33,9 @@ import (
 
 	lifecyclev1alpha1 "github.com/suse/elemental-lifecycle-manager/api/v1alpha1"
 	releasecache "github.com/suse/elemental-lifecycle-manager/internal/release"
+	"github.com/suse/elemental-lifecycle-manager/internal/upgrade"
 	"github.com/suse/elemental/v3/pkg/manifest/resolver"
+	corev1 "k8s.io/api/core/v1"
 )
 
 const requeueInterval = 30 * time.Second
@@ -44,6 +46,7 @@ type ReleaseReconciler struct {
 	Scheme *runtime.Scheme
 
 	RetrieveManifest func(ctx context.Context, registry, version string) (*resolver.ResolvedManifest, error)
+	Pipeline         *upgrade.Pipeline
 }
 
 // +kubebuilder:rbac:groups=lifecycle.suse.com,resources=releases,verbs=get;list;watch;create;update;patch;delete
@@ -108,16 +111,34 @@ func (r *ReleaseReconciler) reconcileNormal(ctx context.Context, release *lifecy
 
 	// TODO: update 'Applied' condition
 
-	_, err := r.getOrRetrieveManifest(ctx, release)
+	manifest, err := r.getOrRetrieveManifest(ctx, release)
 	if err != nil {
 		// TODO: Set manifest failed condition
 		return ctrl.Result{}, fmt.Errorf("retrieving release manifest: %w", err)
 	}
 
 	// TODO: Set manifest succeeded condition
-	// TODO: parse configuration options from manifest
-	// TODO: call upgrade specific reconcilers
+
+	config, err := r.parseUpgradeConfig(ctx, manifest, release)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("parsing upgrade config: %w", err)
+	}
+
+	// TODO: cleanup SUC Plans for previous release
+
+	result, err := r.Pipeline.Reconcile(ctx, config)
+	if err != nil {
+		setPhaseConditionFromError(release, err)
+		return ctrl.Result{}, fmt.Errorf("reconciling upgrade: %w", err)
+	}
+
 	// TODO: update necessary conditions
+
+	if result.AllComplete() {
+		release.Status.Version = config.Version
+		return ctrl.Result{}, nil
+	}
+
 	return ctrl.Result{RequeueAfter: requeueInterval}, nil
 }
 
@@ -160,6 +181,47 @@ func (r *ReleaseReconciler) getOrRetrieveManifest(ctx context.Context, release *
 	}
 
 	return manifest, nil
+}
+
+func (r *ReleaseReconciler) parseDrainOpts(ctx context.Context, release *lifecyclev1alpha1.Release) (*upgrade.DrainOpts, error) {
+	if release.Spec.DisableDrain {
+		return &upgrade.DrainOpts{ControlPlane: false, Worker: false}, nil
+	}
+
+	nodeList := &corev1.NodeList{}
+	if err := r.List(ctx, nodeList); err != nil {
+		return nil, fmt.Errorf("listing nodes: %w", err)
+	}
+
+	var controlPlaneCounter, workerCounter int
+	for _, node := range nodeList.Items {
+		// TODO: move control-plane label under 'plan' package when SUC plan logic is introduced
+		if _, isControlPlane := node.Labels["node-role.kubernetes.io/control-plane"]; isControlPlane {
+			controlPlaneCounter++
+		} else {
+			workerCounter++
+		}
+	}
+
+	switch {
+	case controlPlaneCounter > 1 && workerCounter <= 1:
+		return &upgrade.DrainOpts{ControlPlane: true, Worker: false}, nil
+	case controlPlaneCounter == 1 && workerCounter > 1:
+		return &upgrade.DrainOpts{ControlPlane: false, Worker: true}, nil
+	case controlPlaneCounter <= 1 && workerCounter <= 1:
+		return &upgrade.DrainOpts{ControlPlane: false, Worker: false}, nil
+	default:
+		return &upgrade.DrainOpts{ControlPlane: true, Worker: true}, nil
+	}
+}
+
+func (r *ReleaseReconciler) parseUpgradeConfig(ctx context.Context, manifest *resolver.ResolvedManifest, release *lifecyclev1alpha1.Release) (config *upgrade.Config, err error) {
+	opts, err := r.parseDrainOpts(ctx, release)
+	if err != nil {
+		return nil, fmt.Errorf("parsing drain options: %w", err)
+	}
+
+	return upgrade.NewConfig(manifest, release.Spec.Version, types.NamespacedName{Name: release.Name, Namespace: release.Namespace}, opts)
 }
 
 // SetupWithManager sets up the controller with the Manager.
