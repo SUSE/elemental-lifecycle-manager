@@ -20,6 +20,7 @@ package release
 import (
 	"archive/tar"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -68,7 +69,7 @@ func (s sourceReader) Read(m *source.ReleaseManifestSource) ([]byte, error) {
 	for {
 		header, err := tarReader.Next()
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				return nil, fmt.Errorf("manifest file not found in image at path: %s", manifestPath)
 			}
 			return nil, fmt.Errorf("reading tar stream: %w", err)
