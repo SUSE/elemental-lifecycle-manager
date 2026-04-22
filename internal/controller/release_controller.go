@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
@@ -92,9 +93,6 @@ func (r *ReleaseReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return result, nil
 }
 
-// TODO: remove linter skip once function begins to actually return errors
-//
-//nolint:unparam
 func (r *ReleaseReconciler) reconcileNormal(ctx context.Context, release *lifecyclev1alpha1.Release) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("Upgrade to the platform requested",
@@ -104,20 +102,22 @@ func (r *ReleaseReconciler) reconcileNormal(ctx context.Context, release *lifecy
 	if release.Status.ObservedGeneration != release.Generation {
 		release.Status.ObservedGeneration = release.Generation
 		release.Status.Conditions = nil
-		// TODO: re-initialise 'Pending' conditions
+		initializePendingConditions(release, r.Pipeline.Phases())
 
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// TODO: update 'Applied' condition
+	defer updateAppliedCondition(release, r.Pipeline.Phases())
 
 	manifest, err := r.getOrRetrieveManifest(ctx, release)
 	if err != nil {
-		// TODO: Set manifest failed condition
+		setCondition(release, lifecyclev1alpha1.ConditionManifestResolved, metav1.ConditionFalse,
+			lifecyclev1alpha1.UpgradeFailed, fmt.Sprintf("Failed to retrieve release manifest: %v", err))
 		return ctrl.Result{}, fmt.Errorf("retrieving release manifest: %w", err)
 	}
 
-	// TODO: Set manifest succeeded condition
+	setCondition(release, lifecyclev1alpha1.ConditionManifestResolved, metav1.ConditionTrue,
+		lifecyclev1alpha1.UpgradeSucceeded, "Release manifest retrieved successfully")
 
 	config, err := r.parseUpgradeConfig(ctx, manifest, release)
 	if err != nil {
@@ -132,7 +132,7 @@ func (r *ReleaseReconciler) reconcileNormal(ctx context.Context, release *lifecy
 		return ctrl.Result{}, fmt.Errorf("reconciling upgrade: %w", err)
 	}
 
-	// TODO: update necessary conditions
+	updatePhaseConditions(release, result)
 
 	if result.AllComplete() {
 		release.Status.Version = config.Version
