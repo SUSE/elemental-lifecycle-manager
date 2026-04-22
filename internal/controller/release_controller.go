@@ -135,7 +135,7 @@ func (r *ReleaseReconciler) reconcileNormal(ctx context.Context, release *lifecy
 	updatePhaseConditions(release, result)
 
 	if result.AllComplete() {
-		release.Status.Version = config.Version
+		release.Status.Version = config.ReleaseVersion
 		return ctrl.Result{}, nil
 	}
 

@@ -30,8 +30,8 @@ import (
 type Config struct {
 	// ReleaseNamespacedName is the name and namespace of the Release resource.
 	ReleaseNamespacedName types.NamespacedName
-	// Version is the target release version.
-	Version string
+	// ReleaseVersion is the target release version.
+	ReleaseVersion string
 	// OS contains all upgrade configurations related to the target operating system.
 	OS *OSConfig
 	// Kubernetes contains all upgrade configurations related to the target Kubernetes distribution.
@@ -89,7 +89,7 @@ func NewConfig(manifest *resolver.ResolvedManifest, releaseVersion string, relea
 	core := manifest.CorePlatform
 	config := &Config{
 		ReleaseNamespacedName: releaseNamespacedName,
-		Version:               releaseVersion,
+		ReleaseVersion:        releaseVersion,
 		OS: &OSConfig{
 			Image:     core.Components.OperatingSystem.Image.Base,
 			Version:   parseImageTag(core.Components.OperatingSystem.Image.Base),
