@@ -18,6 +18,9 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"regexp"
+	"strings"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -65,6 +68,14 @@ const (
 	// PlanComplete indicates that a SUC Plan related to the upgrade process has completed.
 	PlanComplete = "PlanComplete"
 )
+
+var namingRegex = regexp.MustCompile(`[^a-z0-9-]+`)
+
+// SanitizeVersion converts a version string to a valid Kubernetes name suffix.
+func SanitizeVersion(version string) string {
+	norm := namingRegex.ReplaceAllString(strings.ToLower(version), "-")
+	return strings.Trim(norm, "-")
+}
 
 // ReleaseSpec defines the desired state of Release
 type ReleaseSpec struct {

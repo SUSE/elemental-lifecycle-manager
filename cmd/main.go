@@ -41,6 +41,7 @@ import (
 	"github.com/suse/elemental-lifecycle-manager/internal/controller"
 	"github.com/suse/elemental-lifecycle-manager/internal/release"
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade"
+	"github.com/suse/elemental-lifecycle-manager/internal/upgrade/reconcilers"
 	webhookv1alpha1 "github.com/suse/elemental-lifecycle-manager/internal/webhook/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
@@ -168,11 +169,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	k8sClient := mgr.GetClient()
+	sucPlanReconciler := reconcilers.NewSUCPlanReconciler(k8sClient)
 	if err := (&controller.ReleaseReconciler{
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
 		RetrieveManifest: release.RetrieveManifest,
-		Pipeline:         upgrade.NewPipeline(),
+		Pipeline: upgrade.NewPipeline(
+			reconcilers.NewOSReconciler(k8sClient, sucPlanReconciler),
+		),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Release")
 		os.Exit(1)
