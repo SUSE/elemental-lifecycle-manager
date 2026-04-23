@@ -21,6 +21,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// Label identification for a Release resource.
+const (
+	ReleaseNameLabel    = "lifecycle.suse.com/release"
+	ReleaseVersionLabel = "lifecycle.suse.com/version"
+)
+
 // Condition types for Release status.
 const (
 	// ConditionApplied indicates whether the release has been applied successfully.
@@ -55,6 +61,9 @@ const (
 
 	// UpgradeFailed indicates that the upgrade process has failed.
 	UpgradeFailed = "Failed"
+
+	// PlanComplete indicates that a SUC Plan related to the upgrade process has completed.
+	PlanComplete = "PlanComplete"
 )
 
 // ReleaseSpec defines the desired state of Release
