@@ -35,6 +35,7 @@ import (
 
 	upgradecattlev1 "github.com/rancher/system-upgrade-controller/pkg/apis/upgrade.cattle.io/v1"
 	lifecyclev1alpha1 "github.com/suse/elemental-lifecycle-manager/api/v1alpha1"
+	"github.com/suse/elemental-lifecycle-manager/internal/plan"
 	releasecache "github.com/suse/elemental-lifecycle-manager/internal/release"
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade"
 	"github.com/suse/elemental/v3/pkg/manifest/resolver"
@@ -126,7 +127,13 @@ func (r *ReleaseReconciler) reconcileNormal(ctx context.Context, release *lifecy
 		return ctrl.Result{}, fmt.Errorf("parsing upgrade config: %w", err)
 	}
 
-	// TODO: cleanup SUC Plans for previous release
+	// Clean up plans from previous versions before creating new ones
+	if release.Status.Version != "" && release.Status.Version != config.ReleaseVersion {
+		if err := r.cleanupOldVersionPlans(ctx, release.Name, release.Status.Version); err != nil {
+			logger.Error(err, "Failed to cleanup old version plans", "oldVersion", release.Status.Version)
+			return ctrl.Result{}, fmt.Errorf("cleaning up plans for version %s: %w", release.Status.Version, err)
+		}
+	}
 
 	result, err := r.Pipeline.Reconcile(ctx, config)
 	if err != nil {
@@ -224,6 +231,35 @@ func (r *ReleaseReconciler) parseUpgradeConfig(ctx context.Context, manifest *re
 	}
 
 	return upgrade.NewConfig(manifest, release.Spec.Version, types.NamespacedName{Name: release.Name, Namespace: release.Namespace}, opts)
+}
+
+// cleanupOldVersionPlans deletes SUC Plans from a previous version.
+func (r *ReleaseReconciler) cleanupOldVersionPlans(ctx context.Context, releaseName, oldVersion string) error {
+	logger := log.FromContext(ctx)
+	logger.Info("Cleaning up old version plans",
+		"release", releaseName,
+		"oldVersion", oldVersion)
+
+	planList := &upgradecattlev1.PlanList{}
+	if err := r.List(ctx, planList,
+		client.InNamespace(plan.Namespace),
+		client.MatchingLabels{
+			lifecyclev1alpha1.ReleaseNameLabel:    releaseName,
+			lifecyclev1alpha1.ReleaseVersionLabel: lifecyclev1alpha1.SanitizeVersion(oldVersion),
+		},
+	); err != nil {
+		return fmt.Errorf("listing old plans: %w", err)
+	}
+
+	var deleteErrs []error
+	for _, p := range planList.Items {
+		logger.Info("Deleting old plan", "name", p.Name)
+		if err := r.Delete(ctx, &p); err != nil {
+			deleteErrs = append(deleteErrs, fmt.Errorf("deleting plan %s: %w", p.Name, err))
+		}
+	}
+
+	return errors.Join(deleteErrs...)
 }
 
 // mapPlanToRelease maps SUC Plan events to Release reconcile requests.
