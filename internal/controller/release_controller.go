@@ -192,6 +192,7 @@ func (r *ReleaseReconciler) getOrRetrieveManifest(ctx context.Context, release *
 	return manifest, nil
 }
 
+// parseDrainOpts determines which node groups should be drained during the upgrade.
 func (r *ReleaseReconciler) parseDrainOpts(ctx context.Context, release *lifecyclev1alpha1.Release) (*upgrade.DrainOpts, error) {
 	if release.Spec.DisableDrain {
 		return &upgrade.DrainOpts{ControlPlane: false, Worker: false}, nil
@@ -204,8 +205,7 @@ func (r *ReleaseReconciler) parseDrainOpts(ctx context.Context, release *lifecyc
 
 	var controlPlaneCounter, workerCounter int
 	for _, node := range nodeList.Items {
-		// TODO: move control-plane label under 'plan' package when SUC plan logic is introduced
-		if _, isControlPlane := node.Labels["node-role.kubernetes.io/control-plane"]; isControlPlane {
+		if _, isControlPlane := node.Labels[plan.ControlPlaneLabel]; isControlPlane {
 			controlPlaneCounter++
 		} else {
 			workerCounter++
