@@ -21,9 +21,9 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
-	"strings"
 	"text/template"
 
+	"github.com/google/go-containerregistry/pkg/name"
 	upgradecattlev1 "github.com/rancher/system-upgrade-controller/pkg/apis/upgrade.cattle.io/v1"
 	lifecyclev1alpha1 "github.com/suse/elemental-lifecycle-manager/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -49,7 +49,7 @@ func osWorkerName(version string) string {
 
 // OSControlPlane builds a SUC Plan for OS upgrades on control plane nodes.
 func OSControlPlane(releaseName, osImage, osVersion, releaseVersion string, drain bool) (*upgradecattlev1.Plan, error) {
-	script, err := parseUpgradeScript(parseImage(osImage))
+	script, err := parseUpgradeScript(osImage)
 	if err != nil {
 		return nil, fmt.Errorf("parsing OS upgrade script: %w", err)
 	}
@@ -79,7 +79,7 @@ func OSControlPlane(releaseName, osImage, osVersion, releaseVersion string, drai
 
 // OSWorker builds a SUC Plan for OS upgrades on worker nodes.
 func OSWorker(releaseName, osImage, osVersion, releaseVersion string, drain bool) (*upgradecattlev1.Plan, error) {
-	script, err := parseUpgradeScript(parseImage(osImage))
+	script, err := parseUpgradeScript(osImage)
 	if err != nil {
 		return nil, fmt.Errorf("parsing OS upgrade script: %w", err)
 	}
@@ -107,7 +107,12 @@ func OSWorker(releaseName, osImage, osVersion, releaseVersion string, drain bool
 	return p, nil
 }
 
-func parseUpgradeScript(repo, version string) (string, error) {
+func parseUpgradeScript(osImage string) (string, error) {
+	ref, err := name.NewTag(osImage, name.WeakValidation)
+	if err != nil {
+		return "", fmt.Errorf("parsing OS image %q: %w", osImage, err)
+	}
+
 	tmpl, err := template.New("os-upgrade").Parse(osUpgradeScriptTpl)
 	if err != nil {
 		return "", fmt.Errorf("allocating template for OS upgrade script: %w", err)
@@ -117,8 +122,8 @@ func parseUpgradeScript(repo, version string) (string, error) {
 		OSImageRepo    string
 		OSImageVersion string
 	}{
-		OSImageRepo:    repo,
-		OSImageVersion: version,
+		OSImageRepo:    ref.Context().Name(),
+		OSImageVersion: ref.TagStr(),
 	}
 
 	var out bytes.Buffer
@@ -127,18 +132,4 @@ func parseUpgradeScript(repo, version string) (string, error) {
 	}
 
 	return out.String(), nil
-}
-
-func parseImage(image string) (repo, tag string) {
-	i := strings.LastIndex(image, ":")
-
-	// Find the last slash to ensure the colon we found
-	// isn't just a port number in the registry URL
-	lastSlash := strings.LastIndex(image, "/")
-
-	if i == -1 || i < lastSlash {
-		return image, "latest"
-	}
-
-	return image[:i], image[i+1:]
 }
