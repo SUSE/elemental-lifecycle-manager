@@ -19,8 +19,8 @@ package upgrade
 
 import (
 	"fmt"
-	"strings"
 
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/suse/elemental/v3/pkg/manifest/api"
 	"github.com/suse/elemental/v3/pkg/manifest/resolver"
 	"k8s.io/apimachinery/pkg/types"
@@ -87,12 +87,17 @@ func NewConfig(manifest *resolver.ResolvedManifest, releaseVersion string, relea
 	}
 
 	core := manifest.CorePlatform
+	ref, err := name.NewTag(core.Components.OperatingSystem.Image.Base, name.WeakValidation)
+	if err != nil {
+		return nil, fmt.Errorf("parsing OS image %q: %w", core.Components.OperatingSystem.Image.Base, err)
+	}
+
 	config := &Config{
 		ReleaseNamespacedName: releaseNamespacedName,
 		ReleaseVersion:        releaseVersion,
 		OS: &OSConfig{
 			Image:     core.Components.OperatingSystem.Image.Base,
-			Version:   parseImageTag(core.Components.OperatingSystem.Image.Base),
+			Version:   ref.TagStr(),
 			DrainOpts: drainOpts,
 		},
 	}
@@ -137,18 +142,4 @@ func helmChartConfig(core, product *api.Helm) *HelmChartConfig {
 	}
 
 	return config
-}
-
-func parseImageTag(image string) string {
-	i := strings.LastIndex(image, ":")
-
-	// Find the last slash to ensure the colon we found
-	// isn't just a port number in the registry URL
-	lastSlash := strings.LastIndex(image, "/")
-
-	if i == -1 || i < lastSlash {
-		return "latest"
-	}
-
-	return image[i+1:]
 }
