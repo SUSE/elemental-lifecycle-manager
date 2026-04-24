@@ -368,13 +368,13 @@ func hashContent(content string) string {
 // RKE2 ships its core packaged components as HelmChart resources, so this function returns a map
 // of HelmChart resources keyed by the HelmChart name.
 func findRKE2PackagedComponents(ctx context.Context, c client.Client) (map[string]helmv1.HelmChart, error) {
-	// Right now there is no conclusive way to retrieve a RKE2 packaged component by a single delimeter, so this function
-	// uses a set of delimeters that are specific to RKE2 HelmChart resources. While it is possible to miss a some charts,
-	// this set of delimeters matches all HelmCharts related to the core use-case deploymet of RKE2.
+	// Right now there is no conclusive way to retrieve a RKE2 packaged component by a single delimiter, so this function
+	// uses a set of delimiters that are specific to RKE2 HelmChart resources. While it is possible to miss a some charts,
+	// this set of delimiters matches all HelmCharts related to the core use-case deployment of RKE2.
 	const (
 		// rke2HelmChartNS is the namespace under which all RKE2 related HelmChart resources are deployed.
 		rke2HelmChartNS = "kube-system"
-		// namePrefix is the prefix that the core RKE2 releated HelmChart resources have.
+		// namePrefix is the prefix that the core RKE2 related HelmChart resources have.
 		namePrefix = "rke2-"
 		// ownerAnnotation is the label for the name of the owner of the HelmChart resource.
 		ownerAnnotation = "objectset.rio.cattle.io/owner-name"
