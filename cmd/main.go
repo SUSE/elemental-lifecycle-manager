@@ -21,9 +21,11 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
+	"strings"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
+	"k8s.io/client-go/discovery"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -36,9 +38,11 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	helmv1 "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	upgradecattlev1 "github.com/rancher/system-upgrade-controller/pkg/apis/upgrade.cattle.io/v1"
 	lifecyclev1alpha1 "github.com/suse/elemental-lifecycle-manager/api/v1alpha1"
 	"github.com/suse/elemental-lifecycle-manager/internal/controller"
+	"github.com/suse/elemental-lifecycle-manager/internal/helm"
 	"github.com/suse/elemental-lifecycle-manager/internal/release"
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade"
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade/reconcilers"
@@ -56,6 +60,7 @@ func init() {
 
 	utilruntime.Must(lifecyclev1alpha1.AddToScheme(scheme))
 	utilruntime.Must(upgradecattlev1.AddToScheme(scheme))
+	utilruntime.Must(helmv1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -170,6 +175,31 @@ func main() {
 	}
 
 	k8sClient := mgr.GetClient()
+	helmClient, err := helm.NewClient()
+	if err != nil {
+		setupLog.Error(err, "unable to create helm client")
+		os.Exit(1)
+	}
+
+	discoveryClient, err := discovery.NewDiscoveryClientForConfig(mgr.GetConfig())
+	if err != nil {
+		setupLog.Error(err, "unable to setup discovery client")
+		os.Exit(1)
+	}
+
+	serverVersion, err := discoveryClient.ServerVersion()
+	if err != nil {
+		setupLog.Error(err, "unable to parse server version")
+		os.Exit(1)
+	}
+
+	var packagedComponendsHandler reconcilers.KubernetesPackagedComponentsHandler
+	switch {
+	// Hardening for when the controller supports Kubernetes distributions other than RKE2
+	case strings.Contains(serverVersion.GitVersion, "rke2"):
+		packagedComponendsHandler = reconcilers.NewRKE2PackagedComponentsHandler(k8sClient, helmClient, nil)
+	}
+
 	sucPlanReconciler := reconcilers.NewSUCPlanReconciler(k8sClient)
 	if err := (&controller.ReleaseReconciler{
 		Client:           mgr.GetClient(),
@@ -177,6 +207,11 @@ func main() {
 		RetrieveManifest: release.RetrieveManifest,
 		Pipeline: upgrade.NewPipeline(
 			reconcilers.NewOSReconciler(k8sClient, sucPlanReconciler),
+			reconcilers.NewKubernetesReconciler(
+				k8sClient,
+				sucPlanReconciler,
+				packagedComponendsHandler,
+			),
 		),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Release")
