@@ -67,6 +67,10 @@ const (
 
 	// PlanComplete indicates that a SUC Plan related to the upgrade process has completed.
 	PlanComplete = "PlanComplete"
+
+	// K8sPackagedComponentsAvailable indicates that all packaged components related to a
+	// Kubernetes distribution are available.
+	K8sPackagedComponentsAvailable = "Available"
 )
 
 var namingRegex = regexp.MustCompile(`[^a-z0-9-]+`)
