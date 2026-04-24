@@ -193,11 +193,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	var packagedComponendsHandler reconcilers.KubernetesPackagedComponentsHandler
+	var packagedComponentsHandler reconcilers.KubernetesPackagedComponentsHandler
 	switch {
 	// Hardening for when the controller supports Kubernetes distributions other than RKE2
 	case strings.Contains(serverVersion.GitVersion, "rke2"):
-		packagedComponendsHandler = reconcilers.NewRKE2PackagedComponentsHandler(k8sClient, helmClient, nil)
+		packagedComponentsHandler = reconcilers.NewRKE2PackagedComponentsHandler(k8sClient, helmClient, nil)
 	}
 
 	sucPlanReconciler := reconcilers.NewSUCPlanReconciler(k8sClient)
@@ -210,7 +210,7 @@ func main() {
 			reconcilers.NewKubernetesReconciler(
 				k8sClient,
 				sucPlanReconciler,
-				packagedComponendsHandler,
+				packagedComponentsHandler,
 			),
 		),
 	}).SetupWithManager(mgr); err != nil {

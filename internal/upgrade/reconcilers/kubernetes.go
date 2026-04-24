@@ -43,7 +43,7 @@ type PackagedComponentChartSnapshot struct {
 }
 
 // PackagedComponentsSnapshot represents a snapshot of the state
-// off all packaged components related to a Kubernetes distribution.
+// of all packaged components related to a Kubernetes distribution.
 type PackagedComponentsSnapshot struct {
 	Charts []*PackagedComponentChartSnapshot
 }
