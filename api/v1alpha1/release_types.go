@@ -70,7 +70,7 @@ const (
 
 	// K8sPackagedComponentsAvailable indicates that all packaged components related to a
 	// Kubernetes distribution are available.
-	K8sPackagedComponentsAvailable = "Available"
+	K8sPackagedComponentsAvailable = "PackagedComponentsAvailable"
 )
 
 var namingRegex = regexp.MustCompile(`[^a-z0-9-]+`)
