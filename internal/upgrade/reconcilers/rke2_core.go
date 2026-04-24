@@ -108,7 +108,7 @@ func (h *RKE2PackagedComponentsHandler) GenerateSnapshot(ctx context.Context, co
 	// If the retrieved snapshot was for a different release, then recreate it.
 	if recreate {
 		// Ensure the snapshot is removed before creating it for the desired configuration.
-		if err := h.deleteSnapshotAndWait(ctx, snapshot, 1*time.Second, 120*time.Second); err != nil {
+		if err := h.deleteSnapshotAndWait(ctx, snapshot, 1*time.Second, 15*time.Second); err != nil {
 			return nil, fmt.Errorf("waiting for snapshot %s deletion: %w", snapshot.Name, err)
 		}
 
