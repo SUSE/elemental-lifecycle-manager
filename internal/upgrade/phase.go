@@ -43,7 +43,7 @@ func (p Phase) ConditionType() string {
 func (p Phase) SkippedStatus() *PhaseStatus {
 	return &PhaseStatus{
 		State:   lifecyclev1alpha1.UpgradeSkipped,
-		Message: fmt.Sprintf("Upgrade for phase '%s' skipped", p),
+		Message: fmt.Sprintf("Upgrade for phase %q skipped", p),
 	}
 }
 

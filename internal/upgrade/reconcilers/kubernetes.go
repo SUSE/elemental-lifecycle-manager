@@ -109,7 +109,7 @@ func (r *KubernetesReconciler) Reconcile(ctx context.Context, config *upgrade.Co
 	for _, p := range plans {
 		result, err := r.sucReconciler.Reconcile(ctx, p)
 		if err != nil {
-			return nil, fmt.Errorf("reconciling Kubernetes upgrade plan '%s': %w", p.Name, err)
+			return nil, fmt.Errorf("reconciling Kubernetes upgrade plan %q: %w", p.Name, err)
 		}
 
 		// If the plan is not in a 'Complete' status, return its current status.

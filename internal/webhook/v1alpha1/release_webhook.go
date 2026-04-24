@@ -100,9 +100,9 @@ func (r *ReleaseValidator) ValidateUpdate(_ context.Context, oldRelease, newRele
 
 		switch indicator {
 		case 0:
-			return nil, fmt.Errorf("any edits over '%s' must come with an increment of the version", newRelease.Name)
+			return nil, fmt.Errorf("any edits over %q must come with an increment of the version", newRelease.Name)
 		case -1:
-			return nil, fmt.Errorf("new version must be greater than the currently applied one ('%s')", oldRelease.Status.Version)
+			return nil, fmt.Errorf("new version must be greater than the currently applied one (%q)", oldRelease.Status.Version)
 		}
 	}
 
@@ -131,7 +131,7 @@ func validateNoUpgradeInProgress(release *lifecyclev1alpha1.Release) error {
 		return nil
 	}
 
-	return fmt.Errorf("cannot edit while upgrade is in '%s' state", appliedCond.Reason)
+	return fmt.Errorf("cannot edit while upgrade is in %q state", appliedCond.Reason)
 }
 
 // validateReleaseVersion checks the provided version string by first attempting

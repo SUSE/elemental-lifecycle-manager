@@ -134,13 +134,13 @@ func (h *RKE2PackagedComponentsHandler) ReconcileAvailability(ctx context.Contex
 		// as available if its Helm Controller created Job has completed.
 		jobComplete, err := h.isHelmChartJobComplete(ctx, pair)
 		if err != nil {
-			return nil, fmt.Errorf("validating job for RKE2 packaged component '%s': %w", pair.Chart.Name, err)
+			return nil, fmt.Errorf("validating job for RKE2 packaged component %q: %w", pair.Chart.Name, err)
 		}
 
 		if !jobComplete {
 			return &upgrade.PhaseStatus{
 				State:   lifecyclev1alpha1.UpgradeInProgress,
-				Message: fmt.Sprintf("RKE2 packaged component %s execution is still in progress", pair.Chart.Name),
+				Message: fmt.Sprintf("RKE2 packaged component %q execution is still in progress", pair.Chart.Name),
 			}, nil
 		}
 	}
@@ -192,11 +192,11 @@ func (h *RKE2PackagedComponentsHandler) populateSnapshot(ctx context.Context, sn
 	for _, rke2Chart := range rke2Charts {
 		chartSnapshot, err := h.createHelmChartSnapshot(rke2Chart)
 		if err != nil {
-			return fmt.Errorf("parsing fingerprint from HelmChart '%s': %w", rke2Chart.Name, err)
+			return fmt.Errorf("parsing fingerprint from HelmChart %q: %w", rke2Chart.Name, err)
 		}
 		data, err := json.Marshal(chartSnapshot)
 		if err != nil {
-			return fmt.Errorf("marshaling RKE2 HelmChart '%s' fingerprint: %w", rke2Chart.Name, err)
+			return fmt.Errorf("marshaling RKE2 HelmChart %q fingerprint: %w", rke2Chart.Name, err)
 		}
 
 		snapshot.Data[rke2Chart.Name] = string(data)
@@ -221,7 +221,7 @@ func (h *RKE2PackagedComponentsHandler) createHelmChartSnapshot(chart helmv1.Hel
 
 	info, err := h.helmClient.RetrieveRelease(chart.Name)
 	if err != nil {
-		return nil, fmt.Errorf("retrieving Helm release '%s': %w", chart.Name, err)
+		return nil, fmt.Errorf("retrieving Helm release %q: %w", chart.Name, err)
 	}
 
 	snapshot.ReleaseRevisions = info.Revisions
@@ -235,7 +235,7 @@ func (h *RKE2PackagedComponentsHandler) parseSnapshot(snapshot *corev1.ConfigMap
 	for name, data := range snapshot.Data {
 		parsedChartSnapshot := &PackagedComponentChartSnapshot{}
 		if err := json.Unmarshal([]byte(data), parsedChartSnapshot); err != nil {
-			return nil, fmt.Errorf("parsing RKE2 packaged component '%s': %w", name, err)
+			return nil, fmt.Errorf("parsing RKE2 packaged component %q: %w", name, err)
 		}
 		parsedSnapshot.Charts = append(parsedSnapshot.Charts, parsedChartSnapshot)
 	}
@@ -247,7 +247,7 @@ func (h *RKE2PackagedComponentsHandler) deleteSnapshotAndWait(ctx context.Contex
 	// Only delete if snapshot is not already being deleted
 	if snapshot.GetDeletionTimestamp().IsZero() {
 		if err := h.Delete(ctx, snapshot); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("deleting RKE2 packaged component snapshot '%s': %w", snapshot.Name, err)
+			return fmt.Errorf("deleting RKE2 packaged component snapshot %q: %w", snapshot.Name, err)
 		}
 	}
 
@@ -387,7 +387,7 @@ func findRKE2PackagedComponents(ctx context.Context, c client.Client) (map[strin
 
 	var allCharts helmv1.HelmChartList
 	if err := c.List(ctx, &allCharts, client.InNamespace(rke2HelmChartNS)); err != nil {
-		return nil, fmt.Errorf("listing HelmChart resources in '%s' namespace: %w", rke2HelmChartNS, err)
+		return nil, fmt.Errorf("listing HelmChart resources in %q namespace: %w", rke2HelmChartNS, err)
 	}
 
 	found := make(map[string]helmv1.HelmChart, len(allCharts.Items))

@@ -67,7 +67,7 @@ func (r *OSReconciler) Reconcile(ctx context.Context, config *upgrade.Config) (*
 	for _, p := range plans {
 		result, err := r.sucReconciler.Reconcile(ctx, p)
 		if err != nil {
-			return nil, fmt.Errorf("reconciling OS upgrade plan '%s': %w", p.Name, err)
+			return nil, fmt.Errorf("reconciling OS upgrade plan %q: %w", p.Name, err)
 		}
 
 		// If the plan is not in a 'Complete' status, return its current status.

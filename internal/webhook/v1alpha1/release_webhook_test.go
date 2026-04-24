@@ -142,7 +142,7 @@ var _ = Describe("Release Webhook", func() {
 
 			err := k8sClient.Update(ctx, release)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(MatchError(ContainSubstring("cannot edit while upgrade is in 'Pending' state")))
+			Expect(err).To(MatchError(ContainSubstring("cannot edit while upgrade is in \"Pending\" state")))
 		})
 
 		It("Should be denied when an upgrade is in progress", func() {
@@ -153,7 +153,7 @@ var _ = Describe("Release Webhook", func() {
 
 			err := k8sClient.Update(ctx, release)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(MatchError(ContainSubstring("cannot edit while upgrade is in 'InProgress' state")))
+			Expect(err).To(MatchError(ContainSubstring("cannot edit while upgrade is in \"InProgress\" state")))
 		})
 
 		It("Should pass if the last update has failed, but finished", func() {
@@ -179,14 +179,14 @@ var _ = Describe("Release Webhook", func() {
 
 			err := k8sClient.Update(ctx, release)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(MatchError(ContainSubstring("new version must be greater than the currently applied one ('1.0.0')")))
+			Expect(err).To(MatchError(ContainSubstring("new version must be greater than the currently applied one (\"1.0.0\")")))
 		})
 
 		It("Should be denied if the new release version is lower than the last applied one", func() {
 			release.Spec.Version = "0.6.0"
 			err := k8sClient.Update(ctx, release)
 			Expect(err).To(HaveOccurred())
-			Expect(err).To(MatchError(ContainSubstring("new version must be greater than the currently applied one ('1.0.0')")))
+			Expect(err).To(MatchError(ContainSubstring("new version must be greater than the currently applied one (\"1.0.0\")")))
 		})
 
 		It("Should pass if the new release version is higher than the last applied one", func() {
