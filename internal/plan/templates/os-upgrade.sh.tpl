@@ -21,4 +21,4 @@ if [ -n "$CURRENT" ]; then
     fi
 fi
 
-USE_LOCAL_IMAGES=false upgrader "$INCOMING" && chroot /host reboot
+{{ if .FetchRemote }}USE_LOCAL_IMAGES=false {{ end }}upgrader "$INCOMING" && chroot /host reboot
