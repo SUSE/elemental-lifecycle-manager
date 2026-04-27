@@ -21,6 +21,8 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"os"
+	"strconv"
 	"text/template"
 
 	"github.com/google/go-containerregistry/pkg/name"
@@ -118,10 +120,20 @@ func parseUpgradeScript(osImage string) (string, error) {
 		return "", fmt.Errorf("allocating template for OS upgrade script: %w", err)
 	}
 
+	// By default OS upgrade will be done by using the locally available OS image.
+	// This functionality gives us the option to override that default
+	// and pull the image from its remote instead.
+	fetchRemote := func() bool {
+		value, err := strconv.ParseBool(os.Getenv("E3CTL_FETCH_REMOTE"))
+		return err == nil && value
+	}
+
 	data := struct {
+		FetchRemote    bool
 		OSImageRepo    string
 		OSImageVersion string
 	}{
+		FetchRemote:    fetchRemote(),
 		OSImageRepo:    ref.Context().Name(),
 		OSImageVersion: ref.TagStr(),
 	}

@@ -18,6 +18,9 @@ limitations under the License.
 package plan
 
 import (
+	"os"
+	"strings"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -57,7 +60,7 @@ if [ -n "$CURRENT" ]; then
     fi
 fi
 
-USE_LOCAL_IMAGES=false upgrader "$INCOMING" && chroot /host reboot
+upgrader "$INCOMING" && chroot /host reboot
 `
 	)
 
@@ -88,7 +91,7 @@ USE_LOCAL_IMAGES=false upgrader "$INCOMING" && chroot /host reboot
 	Describe("OSControlPlane", Ordered, func() {
 		var plan *upgradecattlev1.Plan
 
-		BeforeAll(func() {
+		BeforeEach(func() {
 			var err error
 			plan, err = OSControlPlane(releaseName, osImage, osVersion, releaseVersion, drain)
 			Expect(err).ToNot(HaveOccurred())
@@ -143,7 +146,7 @@ USE_LOCAL_IMAGES=false upgrader "$INCOMING" && chroot /host reboot
 	Describe("OSWorker", Ordered, func() {
 		var plan *upgradecattlev1.Plan
 
-		BeforeAll(func() {
+		BeforeEach(func() {
 			var err error
 			plan, err = OSWorker(releaseName, osImage, osVersion, releaseVersion, drain)
 			Expect(err).ToNot(HaveOccurred())
@@ -192,6 +195,28 @@ USE_LOCAL_IMAGES=false upgrader "$INCOMING" && chroot /host reboot
 			Expect(ptr.Deref(plan.Spec.Drain.IgnoreDaemonSets, false)).To(BeTrue())
 			Expect(plan.Spec.Drain.Force).To(BeTrue())
 			Expect(plan.Spec.Drain.Timeout.String()).To(Equal("15m"))
+		})
+	})
+
+	Describe("Upgrade script", func() {
+		It("uses local container images for upgrade", func() {
+			script, err := parseUpgradeScript(osImage)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(script).To(Equal(expectedUpgradeScript))
+			Expect(script).ToNot(ContainSubstring("USE_LOCAL_IMAGES=false upgrader"))
+		})
+
+		It("uses remote container images for upgrade", func() {
+			Expect(os.Setenv("E3CTL_FETCH_REMOTE", "true")).To(Succeed())
+			DeferCleanup(os.Unsetenv, "E3CTL_FETCH_REMOTE")
+
+			old := `upgrader "$INCOMING" && chroot /host reboot`
+			new := `USE_LOCAL_IMAGES=false upgrader "$INCOMING" && chroot /host reboot`
+			expectedRemoteUpgradeScript := strings.Replace(expectedUpgradeScript, old, new, 1)
+
+			script, err := parseUpgradeScript(osImage)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(script).To(Equal(expectedRemoteUpgradeScript))
 		})
 	})
 })
