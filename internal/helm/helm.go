@@ -28,6 +28,38 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
+// ChartState represents the current state of a Helm chart upgrade.
+type ChartState int
+
+const (
+	ChartStateUnknown ChartState = iota
+	ChartStateNotInstalled
+	ChartStateVersionAlreadyInstalled
+	ChartStateInProgress
+	ChartStateFailed
+	ChartStateSucceeded
+)
+
+// String returns a human-readable representation of the chart state.
+func (s ChartState) String() string {
+	switch s {
+	case ChartStateNotInstalled:
+		return "not installed"
+	case ChartStateVersionAlreadyInstalled:
+		return "version already installed"
+	case ChartStateInProgress:
+		return "in progress"
+	case ChartStateFailed:
+		return "failed"
+	case ChartStateSucceeded:
+		return "succeeded"
+	default:
+		return "unknown"
+	}
+}
+
+var ErrReleaseNotFound = helmdriver.ErrReleaseNotFound
+
 // ReleaseInfo contains relevant information about a Helm release
 // needed for upgrade operations.
 type ReleaseInfo struct {

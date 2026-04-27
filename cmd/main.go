@@ -212,6 +212,7 @@ func main() {
 				sucPlanReconciler,
 				packagedComponentsHandler,
 			),
+			reconcilers.NewHelmReconciler(k8sClient, helmClient),
 		),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Release")
