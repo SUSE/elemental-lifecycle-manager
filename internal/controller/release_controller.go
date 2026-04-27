@@ -33,11 +33,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	helmv1 "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	upgradecattlev1 "github.com/rancher/system-upgrade-controller/pkg/apis/upgrade.cattle.io/v1"
 	lifecyclev1alpha1 "github.com/suse/elemental-lifecycle-manager/api/v1alpha1"
 	"github.com/suse/elemental-lifecycle-manager/internal/plan"
 	releasecache "github.com/suse/elemental-lifecycle-manager/internal/release"
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade"
+	"github.com/suse/elemental-lifecycle-manager/internal/upgrade/reconcilers"
 	"github.com/suse/elemental/v3/pkg/manifest/resolver"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -289,12 +291,46 @@ func (r *ReleaseReconciler) mapPlanToRelease(ctx context.Context, obj client.Obj
 	return nil
 }
 
+// mapHelmChartToRelease maps HelmChart events to Release reconcile requests.
+// Uses the release name label on the HelmChart to find the corresponding Release.
+func (r *ReleaseReconciler) mapHelmChartToRelease(ctx context.Context, obj client.Object) []ctrl.Request {
+	// Only watch HelmCharts in the namespace where we create them
+	if obj.GetNamespace() != reconcilers.HelmChartNamespace {
+		return nil
+	}
+
+	releaseName := obj.GetLabels()[lifecyclev1alpha1.ReleaseNameLabel]
+	if releaseName == "" {
+		return nil
+	}
+
+	// Release resources are cluster-scoped, so reconcile requests do not include
+	// a namespace to use with Get. Since the Release webhook ensures there is only
+	// one Release per cluster, it is safe to use List to retrieve the active Release.
+	releaseList := &lifecyclev1alpha1.ReleaseList{}
+	if err := r.List(ctx, releaseList); err != nil {
+		return nil
+	}
+
+	for _, rel := range releaseList.Items {
+		if rel.Name == releaseName {
+			return []ctrl.Request{{
+				NamespacedName: client.ObjectKeyFromObject(&rel),
+			}}
+		}
+	}
+
+	return nil
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *ReleaseReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&lifecyclev1alpha1.Release{}).
 		// Ensure we reconcile on any event change relating to SUC Plans created by the controller
 		Watches(&upgradecattlev1.Plan{}, handler.EnqueueRequestsFromMapFunc(r.mapPlanToRelease)).
+		// Ensure we reconcile on any event change relating to HelmCharts created/updated by the controller
+		Watches(&helmv1.HelmChart{}, handler.EnqueueRequestsFromMapFunc(r.mapHelmChartToRelease)).
 		Named("release").
 		Complete(r)
 }
