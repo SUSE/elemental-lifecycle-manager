@@ -1,0 +1,138 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "elemental-lifecycle-manager.managerRoleName" . }}
+  labels:
+    {{- include "elemental-lifecycle-manager.labels" . | nindent 4 }}
+rules:
+  - nonResourceURLs:
+      - /version
+    verbs:
+      - get
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+    verbs:
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - batch
+    resources:
+      - jobs
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - helm.cattle.io
+    resources:
+      - helmcharts
+    verbs:
+      - create
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - lifecycle.suse.com
+    resources:
+      - releases
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - lifecycle.suse.com
+    resources:
+      - releases/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - lifecycle.suse.com
+    resources:
+      - releases/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - upgrade.cattle.io
+    resources:
+      - plans
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  {{- if and .Values.metrics.enabled .Values.metrics.secure }}
+  - apiGroups:
+      - authentication.k8s.io
+    resources:
+      - tokenreviews
+    verbs:
+      - create
+  - apiGroups:
+      - authorization.k8s.io
+    resources:
+      - subjectaccessreviews
+    verbs:
+      - create
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "elemental-lifecycle-manager.managerRoleBindingName" . }}
+  labels:
+    {{- include "elemental-lifecycle-manager.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "elemental-lifecycle-manager.managerRoleName" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "elemental-lifecycle-manager.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- if and .Values.metrics.enabled .Values.metrics.secure }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "elemental-lifecycle-manager.metricsReaderRoleName" . }}
+  labels:
+    {{- include "elemental-lifecycle-manager.labels" . | nindent 4 }}
+rules:
+  - nonResourceURLs:
+      - /metrics
+    verbs:
+      - get
+{{- end }}

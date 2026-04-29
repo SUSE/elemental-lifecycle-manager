@@ -1,0 +1,6 @@
+apiVersion: v2
+name: elemental-lifecycle-manager-crds
+description: Custom Resource Definitions (CRDs) for the Elemental Lifecycle Manager
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
