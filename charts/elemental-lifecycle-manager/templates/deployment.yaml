@@ -1,0 +1,149 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "elemental-lifecycle-manager.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "elemental-lifecycle-manager.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "elemental-lifecycle-manager.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "elemental-lifecycle-manager.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "elemental-lifecycle-manager.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- $args := list }}
+      {{- if include "elemental-lifecycle-manager.leaderElectionEnabled" . }}
+      {{- $args = append $args "--leader-elect" }}
+      {{- end }}
+      {{- if .Values.webhook.enabled }}
+      {{- $args = append $args "--webhook-cert-path=/tmp/k8s-webhook-server/serving-certs" }}
+      {{- end }}
+      {{- if .Values.metrics.enabled }}
+      {{- $args = append $args "--metrics-bind-address=:8080" }}
+      {{- $args = append $args (printf "--metrics-secure=%t" .Values.metrics.secure) }}
+      {{- if .Values.metrics.secure }}
+      {{- $args = append $args "--metrics-cert-path=/tmp/k8s-metrics-server/metrics-certs" }}
+      {{- end }}
+      {{- end }}
+      {{- if .Values.enableHTTP2 }}
+      {{- $args = append $args "--enable-http2" }}
+      {{- end }}
+      {{- with .Values.extraArgs }}
+      {{- $args = concat $args . }}
+      {{- end }}
+      containers:
+        - name: manager
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /manager
+          {{- with $args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if or (not .Values.webhook.enabled) .Values.extraEnv }}
+          env:
+            {{- if not .Values.webhook.enabled }}
+            - name: ENABLE_WEBHOOKS
+              value: "false"
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- if or .Values.metrics.enabled .Values.webhook.enabled }}
+          ports:
+            {{- if .Values.metrics.enabled }}
+            - containerPort: 8080
+              name: metrics
+              protocol: TCP
+            {{- end }}
+            {{- if .Values.webhook.enabled }}
+            - containerPort: {{ .Values.webhook.service.targetPort }}
+              name: webhook-server
+              protocol: TCP
+            {{- end }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: {{ .Values.healthProbe.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.healthProbe.liveness.periodSeconds }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: {{ .Values.healthProbe.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.healthProbe.readiness.periodSeconds }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if or .Values.webhook.enabled (and .Values.metrics.enabled .Values.metrics.secure) .Values.extraVolumeMounts }}
+          volumeMounts:
+            {{- if .Values.webhook.enabled }}
+            - mountPath: /tmp/k8s-webhook-server/serving-certs
+              name: cert
+              readOnly: true
+            {{- end }}
+            {{- if and .Values.metrics.enabled .Values.metrics.secure }}
+            - mountPath: /tmp/k8s-metrics-server/metrics-certs
+              name: metrics-certs
+              readOnly: true
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if or .Values.webhook.enabled (and .Values.metrics.enabled .Values.metrics.secure) .Values.extraVolumes }}
+      volumes:
+        {{- if .Values.webhook.enabled }}
+        - name: cert
+          secret:
+            defaultMode: 420
+            secretName: {{ include "elemental-lifecycle-manager.webhookSecretName" . }}
+        {{- end }}
+        {{- if and .Values.metrics.enabled .Values.metrics.secure }}
+        - name: metrics-certs
+          secret:
+            defaultMode: 420
+            secretName: {{ include "elemental-lifecycle-manager.metricsSecretName" . }}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+      terminationGracePeriodSeconds: 10
