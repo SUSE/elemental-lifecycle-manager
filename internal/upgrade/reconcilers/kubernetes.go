@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	upgradecattlev1 "github.com/rancher/system-upgrade-controller/pkg/apis/upgrade.cattle.io/v1"
 	lifecyclev1alpha1 "github.com/suse/elemental-lifecycle-manager/api/v1alpha1"
@@ -45,6 +46,12 @@ type PackagedComponentChartSnapshot struct {
 // PackagedComponentsSnapshot represents a snapshot of the state
 // of all packaged components related to a Kubernetes distribution.
 type PackagedComponentsSnapshot struct {
+	// CreationTime is the time at which the snapshot was created.
+	CreationTime time.Time
+	// SourceKubernetesVersion is the Kubernetes version for which the snapshot was done.
+	SourceKubernetesVersion string
+	// Charts represents the charts package component state related to the given source
+	// Kubernetes version.
 	Charts []*PackagedComponentChartSnapshot
 }
 
@@ -52,10 +59,10 @@ type KubernetesPackagedComponentsHandler interface {
 	// GenerateSnapshot creates a snapshot of the packaged components for a specific Kubernetes distribution.
 	// Returns the packaged components snapshot, or an error otherwise.
 	GenerateSnapshot(ctx context.Context, config *upgrade.Config) (*PackagedComponentsSnapshot, error)
-	// ReconcileAvailability retrieves the currently running packaged components and compares them
-	// with the component states in the given snapshot. If it finds a new or changed component, it
-	// waits for that component to become available.
-	ReconcileAvailability(ctx context.Context, snapshot *PackagedComponentsSnapshot) (*upgrade.PhaseStatus, error)
+	// ReconcileAvailability compares the current packaged components against the given snapshot
+	// and target Kubernetes version. If a component is new or changed, it waits until that
+	// component becomes available.
+	ReconcileAvailability(ctx context.Context, targetVersion string, snapshot *PackagedComponentsSnapshot) (*upgrade.PhaseStatus, error)
 }
 
 // KubernetesReconciler ensures that the Kubernetes distribution of the cluster nodes reflects the desired release state.
@@ -93,7 +100,7 @@ func (r *KubernetesReconciler) Reconcile(ctx context.Context, config *upgrade.Co
 		"version", k8sConfig.Version,
 		"release", config.ReleaseNamespacedName.Name)
 
-	// Before doing any ugrades, generate a snapshot of the current Kubernetes related packaged component states.
+	// Before doing any upgrades, generate a snapshot of the current Kubernetes related packaged component states.
 	snapshot, err := r.packagedComponentsHandler.GenerateSnapshot(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("generating Kubernetes packaged components snapshot: %w", err)
@@ -138,7 +145,7 @@ func (r *KubernetesReconciler) Reconcile(ctx context.Context, config *upgrade.Co
 	// Kubernetes distribution to become available. This ensures that both Kubernetes and its related packaged components
 	// are running before the Kubernetes upgrade is marked as 'Succeeded'. It also avoids failures where the controller tries
 	// to upgrade a chart that depends on a core Kubernetes packaged component before that component is ready.
-	if status, err := r.packagedComponentsHandler.ReconcileAvailability(ctx, snapshot); err != nil {
+	if status, err := r.packagedComponentsHandler.ReconcileAvailability(ctx, k8sConfig.Version, snapshot); err != nil {
 		return nil, fmt.Errorf("ensuring Kubernetes packaged components availability: %w", err)
 	} else if status.State != lifecyclev1alpha1.K8sPackagedComponentsAvailable {
 		return status, nil

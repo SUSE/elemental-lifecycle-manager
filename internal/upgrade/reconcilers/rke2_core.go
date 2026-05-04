@@ -22,6 +22,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -31,6 +32,7 @@ import (
 	lifecyclev1alpha1 "github.com/suse/elemental-lifecycle-manager/api/v1alpha1"
 	"github.com/suse/elemental-lifecycle-manager/internal/helm"
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade"
+	"helm.sh/helm/v4/pkg/storage/driver"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -44,6 +46,8 @@ import (
 const (
 	// chartURLAnnotation an annotation that all RKE2 packaged HelmChart components have.
 	chartURLAnnotation = "helm.cattle.io/chart-url"
+	// kubernetesSourceAnnotation represents the annotation for the source Kubernetes version.
+	kubernetesSourceAnnotation = "lifecycle.suse.com/source-kubernetes-version"
 )
 
 // chartSnapshotPair represents a snapshotted HelmChart component and its currently running counterpart.
@@ -91,9 +95,13 @@ func (h *RKE2PackagedComponentsHandler) GenerateSnapshot(ctx context.Context, co
 
 		// Ensure that the blank snapshot was not modified by the Get function.
 		snapshot = h.blankSnapshot(config)
-		if err := h.createSnapshot(ctx, snapshot, config); err != nil {
+		createdSnapshot, err := h.createSnapshot(ctx, snapshot, config)
+		if err != nil {
 			return nil, fmt.Errorf("creating snapshot %s: %w", snapshot.Name, err)
 		}
+
+		snapshot = createdSnapshot
+		return h.parseSnapshot(snapshot)
 	}
 
 	var recreate bool
@@ -113,26 +121,50 @@ func (h *RKE2PackagedComponentsHandler) GenerateSnapshot(ctx context.Context, co
 		}
 
 		snapshot = h.blankSnapshot(config)
-		if err := h.createSnapshot(ctx, snapshot, config); err != nil {
+		createdSnapshot, err := h.createSnapshot(ctx, snapshot, config)
+		if err != nil {
 			return nil, fmt.Errorf("creating snapshot %s: %w", snapshot.Name, err)
 		}
+		snapshot = createdSnapshot
 	}
 
 	return h.parseSnapshot(snapshot)
 }
 
-// ReconcileAvailability uses the provided snapshot to identify changed or newly added RKE2 HelmChart packaged components and wait for them to become available.
-func (h *RKE2PackagedComponentsHandler) ReconcileAvailability(ctx context.Context, snapshot *PackagedComponentsSnapshot) (*upgrade.PhaseStatus, error) {
+// ReconcileAvailability uses the provided snapshot and target version to identify changed or newly added RKE2 HelmChart packaged components and wait for them to become available.
+func (h *RKE2PackagedComponentsHandler) ReconcileAvailability(ctx context.Context, targetVersion string, snapshot *PackagedComponentsSnapshot) (*upgrade.PhaseStatus, error) {
 	snapshotPairs, err := h.findNewOrChangedRKE2PackagedComponents(ctx, snapshot.Charts)
 	if err != nil {
 		return nil, fmt.Errorf("finding new or changed RKE2 packaged components: %w", err)
 	}
 
+	// If no packaged components changed, the snapshot either matches the target Kubernetes version,
+	// or the Helm Controller has not yet updated the packaged component HelmCharts for the new version.
+	if len(snapshotPairs) == 0 {
+		// Mark components as available if the target Kubernetes version matches the one in the snapshot.
+		if targetVersion == snapshot.SourceKubernetesVersion {
+			return &upgrade.PhaseStatus{
+				State:   lifecyclev1alpha1.K8sPackagedComponentsAvailable,
+				Message: "All RKE2 packaged components available",
+			}, nil
+		}
+
+		// Wait for Helm controller to apply the packaged component changes corresponding to the new target version.
+		return &upgrade.PhaseStatus{
+			State: lifecyclev1alpha1.UpgradeInProgress,
+			Message: fmt.Sprintf(
+				"Waiting for RKE2 packaged components change after Kubernetes upgrade from %q to %q",
+				snapshot.SourceKubernetesVersion,
+				targetVersion,
+			),
+		}, nil
+	}
+
 	// For each snapshot pair, wait for the currently active chart to become available.
 	for _, pair := range snapshotPairs {
-		// RKE2 uses the Helm Controller to manage its helm charts, as such it is enough to mark a HelmChart
-		// as available if its Helm Controller created Job has completed.
-		jobComplete, err := h.isHelmChartJobComplete(ctx, pair)
+		// RKE2 uses the Helm Controller to manage its HelmCharts, so a packaged component is
+		// considered available once the Helm Controller Job completed after the snapshot was created.
+		jobComplete, err := h.isHelmChartJobComplete(ctx, pair, snapshot.CreationTime)
 		if err != nil {
 			return nil, fmt.Errorf("validating job for RKE2 packaged component %q: %w", pair.Chart.Name, err)
 		}
@@ -160,21 +192,41 @@ func (h *RKE2PackagedComponentsHandler) blankSnapshot(config *upgrade.Config) *c
 				lifecyclev1alpha1.ReleaseNameLabel:    config.ReleaseNamespacedName.Name,
 				lifecyclev1alpha1.ReleaseVersionLabel: lifecyclev1alpha1.SanitizeVersion(config.ReleaseVersion),
 			},
+			Annotations: map[string]string{},
 		},
 	}
 }
 
-func (h *RKE2PackagedComponentsHandler) createSnapshot(ctx context.Context, snapshot *corev1.ConfigMap, config *upgrade.Config) error {
-	if err := h.populateSnapshot(ctx, snapshot); err != nil {
-		return fmt.Errorf("populating RKE2 packaged components snapshot: %w", err)
+// createSnapshot creates a snapshot from the given snapshot template and returns the created Kubernetes resource, or an error otherwise.
+func (h *RKE2PackagedComponentsHandler) createSnapshot(ctx context.Context, snapshotTpl *corev1.ConfigMap, config *upgrade.Config) (*corev1.ConfigMap, error) {
+	nodes := &corev1.NodeList{}
+	// RKE2 keeps all nodes on the same Kubernetes version, so one node is enough
+	// to determine the cluster version for the snapshot.
+	if err := h.List(ctx, nodes, client.Limit(1)); err != nil {
+		return nil, fmt.Errorf("listing node: %w", err)
+	}
+
+	snapshotTpl.Annotations[kubernetesSourceAnnotation] = nodes.Items[0].Status.NodeInfo.KubeletVersion
+
+	if err := h.populateSnapshot(ctx, snapshotTpl); err != nil {
+		return nil, fmt.Errorf("populating RKE2 packaged components snapshot: %w", err)
 	}
 
 	log.FromContext(ctx).Info("Generating RKE2 packaged components snapshot",
-		"name", snapshot.Name,
-		"namespace", snapshot.Namespace,
+		"name", snapshotTpl.Name,
+		"namespace", snapshotTpl.Namespace,
 		"owner", config.ReleaseNamespacedName.Name,
 	)
-	return h.Create(ctx, snapshot)
+	if err := h.Create(ctx, snapshotTpl); err != nil {
+		return nil, fmt.Errorf("creating snapshot %s: %w", snapshotTpl.Name, err)
+	}
+
+	created := &corev1.ConfigMap{}
+	if err := h.Get(ctx, client.ObjectKeyFromObject(snapshotTpl), created); err != nil {
+		return nil, fmt.Errorf("retrieving snapshot %s: %w", snapshotTpl.Name, err)
+	}
+
+	return created, nil
 }
 
 // populateSnapshot locates the currently running RKE2 packaged components, marshals them and stores them in the
@@ -231,7 +283,11 @@ func (h *RKE2PackagedComponentsHandler) createHelmChartSnapshot(chart helmv1.Hel
 }
 
 func (h *RKE2PackagedComponentsHandler) parseSnapshot(snapshot *corev1.ConfigMap) (*PackagedComponentsSnapshot, error) {
-	parsedSnapshot := &PackagedComponentsSnapshot{}
+	parsedSnapshot := &PackagedComponentsSnapshot{
+		CreationTime:            snapshot.CreationTimestamp.UTC(),
+		SourceKubernetesVersion: snapshot.Annotations[kubernetesSourceAnnotation],
+	}
+
 	for name, data := range snapshot.Data {
 		parsedChartSnapshot := &PackagedComponentChartSnapshot{}
 		if err := json.Unmarshal([]byte(data), parsedChartSnapshot); err != nil {
@@ -310,7 +366,9 @@ func (h *RKE2PackagedComponentsHandler) chartStateChanged(chart *helmv1.HelmChar
 		chart.Annotations[chartURLAnnotation] != chartSnapshot.ChartURL
 }
 
-func (h *RKE2PackagedComponentsHandler) isHelmChartJobComplete(ctx context.Context, pair *chartSnapshotPair) (bool, error) {
+// isHelmChartJobComplete returns true when the HelmChart's current Job completed after the snapshot creation time.
+// If the Job is missing, the function falls back to the Helm release object.
+func (h *RKE2PackagedComponentsHandler) isHelmChartJobComplete(ctx context.Context, pair *chartSnapshotPair, snapshotCreation time.Time) (bool, error) {
 	chart := pair.Chart
 
 	// Missing Job name in chart status means that the Helm Controller
@@ -324,7 +382,8 @@ func (h *RKE2PackagedComponentsHandler) isHelmChartJobComplete(ctx context.Conte
 		Name:      chart.Status.JobName,
 		Namespace: chart.Namespace,
 	}, job); err != nil {
-		// Job might be cleaned up after completion, check actual helm release version
+		// Job might be cleaned up after completion, or might not yet be created.
+		// Validate which is the case, by looking at the actual Helm release.
 		if apierrors.IsNotFound(err) {
 			return h.hasHelmReleaseAdvancedPastSnapshot(pair)
 		}
@@ -341,12 +400,24 @@ func (h *RKE2PackagedComponentsHandler) isHelmChartJobComplete(ctx context.Conte
 		return false, nil
 	}
 
-	return h.hasHelmReleaseAdvancedPastSnapshot(pair)
+	// Safeguard for the corner case, where the Job is marked as 'Completed', but
+	// the timestamp is not yet populated.
+	if job.Status.CompletionTime == nil || job.Status.CompletionTime.IsZero() {
+		return false, nil
+	}
+
+	// Ensure the Job completed after the recorded snapshot creation time. Helm Controller can delay
+	// creating a new HelmChart Job, so this prevents treating a stale Job as current.
+	return job.Status.CompletionTime.After(snapshotCreation), nil
 }
 
 func (h *RKE2PackagedComponentsHandler) hasHelmReleaseAdvancedPastSnapshot(pair *chartSnapshotPair) (bool, error) {
 	release, err := h.helmClient.RetrieveRelease(pair.Chart.Name)
 	if err != nil {
+		// A missing Helm release indicates that this is a new component not yet handled by the Helm Controller.
+		if errors.Is(err, driver.ErrReleaseNotFound) {
+			return false, nil
+		}
 		return false, fmt.Errorf("retrieving RKE2 packaged component Helm release %q: %w", pair.Chart.Name, err)
 	}
 
