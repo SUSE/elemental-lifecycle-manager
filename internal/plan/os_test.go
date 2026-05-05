@@ -130,7 +130,7 @@ upgrader "$INCOMING" && chroot /host reboot
 		It("configures upgrade container", func() {
 			Expect(plan.Spec.Upgrade).ToNot(BeNil())
 			Expect(plan.Spec.Upgrade.Image).To(Equal(osImage))
-			Expect(plan.Spec.Upgrade.Command).To(Equal([]string{"/bin/sh", "-c"}))
+			Expect(plan.Spec.Upgrade.Command).To(Equal([]string{osUpgradeShell, "-c"}))
 			Expect(plan.Spec.Upgrade.Args).To(Equal([]string{expectedUpgradeScript}))
 		})
 
@@ -185,7 +185,7 @@ upgrader "$INCOMING" && chroot /host reboot
 		It("configures upgrade container", func() {
 			Expect(plan.Spec.Upgrade).ToNot(BeNil())
 			Expect(plan.Spec.Upgrade.Image).To(Equal(osImage))
-			Expect(plan.Spec.Upgrade.Command).To(Equal([]string{"/bin/sh", "-c"}))
+			Expect(plan.Spec.Upgrade.Command).To(Equal([]string{osUpgradeShell, "-c"}))
 			Expect(plan.Spec.Upgrade.Args).To(Equal([]string{expectedUpgradeScript}))
 		})
 

@@ -34,6 +34,7 @@ import (
 const (
 	osControlPlaneBaseName = "elemental-os-control-plane"
 	osWorkerBaseName       = "elemental-os-worker"
+	osUpgradeShell         = "/bin/sh"
 )
 
 //go:embed templates/os-upgrade.sh.tpl
@@ -73,7 +74,7 @@ func OSControlPlane(releaseName, osImage, osVersion, releaseVersion string, drai
 	}
 	p.Spec.Upgrade = &upgradecattlev1.ContainerSpec{
 		Image:   osImage,
-		Command: []string{"/bin/sh", "-c"},
+		Command: []string{osUpgradeShell, "-c"},
 		Args:    []string{script},
 	}
 	return p, nil
@@ -103,7 +104,7 @@ func OSWorker(releaseName, osImage, osVersion, releaseVersion string, drain bool
 	}
 	p.Spec.Upgrade = &upgradecattlev1.ContainerSpec{
 		Image:   osImage,
-		Command: []string{"/bin/sh", "-c"},
+		Command: []string{osUpgradeShell, "-c"},
 		Args:    []string{script},
 	}
 	return p, nil

@@ -29,13 +29,19 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const (
+	testNamespace   = "default"
+	testRegistry    = "registry.example.com"
+	testReleaseName = "release"
+)
+
 var _ = Describe("Release Webhook", func() {
 	Context("When creating Release under Validating Webhook", Ordered, func() {
 		It("Should be denied if registry is not specified", func() {
 			release := &lifecyclev1alpha1.Release{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "release",
-					Namespace: "default",
+					Name:      testReleaseName,
+					Namespace: testNamespace,
 				},
 			}
 
@@ -47,11 +53,11 @@ var _ = Describe("Release Webhook", func() {
 		It("Should be denied if release version is not specified", func() {
 			release := &lifecyclev1alpha1.Release{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "release",
-					Namespace: "default",
+					Name:      testReleaseName,
+					Namespace: testNamespace,
 				},
 				Spec: lifecyclev1alpha1.ReleaseSpec{
-					Registry: "registry.example.com",
+					Registry: testRegistry,
 				},
 			}
 
@@ -63,11 +69,11 @@ var _ = Describe("Release Webhook", func() {
 		It("Should be denied if release version is not in semantic format", func() {
 			release := &lifecyclev1alpha1.Release{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "release",
-					Namespace: "default",
+					Name:      testReleaseName,
+					Namespace: testNamespace,
 				},
 				Spec: lifecyclev1alpha1.ReleaseSpec{
-					Registry: "registry.example.com",
+					Registry: testRegistry,
 					Version:  "v1",
 				},
 			}
@@ -80,11 +86,11 @@ var _ = Describe("Release Webhook", func() {
 		It("Should admit if all required fields are provided", func() {
 			release := &lifecyclev1alpha1.Release{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "release",
-					Namespace: "default",
+					Name:      testReleaseName,
+					Namespace: testNamespace,
 				},
 				Spec: lifecyclev1alpha1.ReleaseSpec{
-					Registry: "registry.example.com",
+					Registry: testRegistry,
 					Version:  "0.5.0",
 				},
 			}
@@ -96,10 +102,10 @@ var _ = Describe("Release Webhook", func() {
 			release := &lifecyclev1alpha1.Release{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "release2",
-					Namespace: "default",
+					Namespace: testNamespace,
 				},
 				Spec: lifecyclev1alpha1.ReleaseSpec{
-					Registry: "registry.example.com",
+					Registry: testRegistry,
 					Version:  "0.5.0",
 				},
 			}
@@ -115,7 +121,7 @@ var _ = Describe("Release Webhook", func() {
 
 		BeforeEach(func() {
 			release = &lifecyclev1alpha1.Release{}
-			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: "release", Namespace: "default"}, release)).To(Succeed())
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Name: testReleaseName, Namespace: testNamespace}, release)).To(Succeed())
 		})
 
 		It("Should be denied if release registry is not specified", func() {
@@ -198,11 +204,11 @@ var _ = Describe("Release Webhook", func() {
 	Context("When deleting Release under Validating Webhook", Ordered, func() {
 		release := &lifecyclev1alpha1.Release{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "release",
-				Namespace: "default",
+				Name:      testReleaseName,
+				Namespace: testNamespace,
 			},
 			Spec: lifecyclev1alpha1.ReleaseSpec{
-				Registry: "registry.example.com",
+				Registry: testRegistry,
 				Version:  "1.0.0",
 			},
 		}
