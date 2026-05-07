@@ -1,0 +1,49 @@
+{{- if or (include "elemental-lifecycle-manager.useDefaultWebhookCert" .) (include "elemental-lifecycle-manager.useDefaultMetricsCert" .) }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ include "elemental-lifecycle-manager.certificateIssuerName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "elemental-lifecycle-manager.labels" . | nindent 4 }}
+spec:
+  selfSigned: {}
+{{- end }}
+{{- if include "elemental-lifecycle-manager.useDefaultWebhookCert" . }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "elemental-lifecycle-manager.webhookCertificateName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "elemental-lifecycle-manager.labels" . | nindent 4 }}
+spec:
+  dnsNames:
+    - {{ include "elemental-lifecycle-manager.webhookServiceName" . }}.{{ .Release.Namespace }}.svc
+    - {{ include "elemental-lifecycle-manager.webhookServiceName" . }}.{{ .Release.Namespace }}.svc.cluster.local
+  issuerRef:
+    group: cert-manager.io
+    kind: Issuer
+    name: {{ include "elemental-lifecycle-manager.certificateIssuerName" . }}
+  secretName: {{ include "elemental-lifecycle-manager.webhookCertificateSecretName" . }}
+{{- end }}
+{{- if include "elemental-lifecycle-manager.useDefaultMetricsCert" . }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "elemental-lifecycle-manager.metricsCertificateName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "elemental-lifecycle-manager.labels" . | nindent 4 }}
+spec:
+  dnsNames:
+    - {{ include "elemental-lifecycle-manager.metricsServiceName" . }}.{{ .Release.Namespace }}.svc
+    - {{ include "elemental-lifecycle-manager.metricsServiceName" . }}.{{ .Release.Namespace }}.svc.cluster.local
+  issuerRef:
+    group: cert-manager.io
+    kind: Issuer
+    name: {{ include "elemental-lifecycle-manager.certificateIssuerName" . }}
+  secretName: {{ include "elemental-lifecycle-manager.metricsCertificateSecretName" . }}
+{{- end }}

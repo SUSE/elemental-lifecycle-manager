@@ -1,0 +1,94 @@
+replicaCount: 1
+
+image:
+  repository: registry.suse.com/beta/uc/elemental-lifecycle-manager
+  pullPolicy: IfNotPresent
+  tag: latest
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  # Automatically mount the service account token into the manager Pod.
+  automount: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+resources: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Health probe configuration.
+healthProbe:
+  liveness:
+    initialDelaySeconds: 15
+    periodSeconds: 20
+  readiness:
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+# Metrics endpoint configuration.
+metrics:
+  enabled: false
+  secure: false
+  # Certificate configuration for the metrics server.
+  # Used only when metrics.enabled=true and metrics.secure=true.
+  cert:
+    # When enabled, uses cert-manager to generate a self-signed serving certificate.
+    createDefault: true
+    # Name of an existing Secret containing tls.crt and tls.key to use as the metrics serving certificate.
+    # Used only when cert.createDefault=false.
+    # existingSecret: ""
+  service:
+    name: ""
+    type: ClusterIP
+    port: 8080
+    annotations: {}
+
+# Validation webhook configuration.
+webhook:
+  enabled: true
+  service:
+    name: ""
+    port: 443
+    targetPort: 9443
+    annotations: {}
+  failurePolicy: Fail
+  # Certificate configuration for the webhook.
+  cert:
+    # When enabled, uses cert-manager to generate a self-signed serving certificate.
+    createDefault: true
+    # Name of an existing Secret containing tls.crt and tls.key to use as the webhook serving certificate.
+    # Used only when cert.createDefault=false.
+    # existingSecret: ""
+    # CA bundle used by the API server to verify the webhook serving certificate.
+    # Used only when cert.createDefault=false.
+    # caBundle: ""
+
+# Enables HTTP/2 for the webhook and metrics servers.
+# Disabled by default to reduce exposure to HTTP/2-related vulnerabilities.
+enableHTTP2: false
+
+extraArgs: []
+extraEnv: []
+extraVolumes: []
+extraVolumeMounts: []

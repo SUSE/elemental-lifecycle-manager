@@ -1,0 +1,20 @@
+{{- if .Values.webhook.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "elemental-lifecycle-manager.webhookServiceName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "elemental-lifecycle-manager.labels" . | nindent 4 }}
+  {{- with .Values.webhook.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ports:
+    - port: {{ .Values.webhook.service.port }}
+      protocol: TCP
+      targetPort: {{ .Values.webhook.service.targetPort }}
+  selector:
+    {{- include "elemental-lifecycle-manager.selectorLabels" . | nindent 4 }}
+{{- end }}
