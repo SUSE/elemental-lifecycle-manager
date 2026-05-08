@@ -3,7 +3,8 @@ replicaCount: 1
 image:
   repository: registry.suse.com/beta/uc/elemental-lifecycle-manager
   pullPolicy: IfNotPresent
-  tag: latest
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
 
 imagePullSecrets: []
 nameOverride: ""
