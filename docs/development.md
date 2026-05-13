@@ -14,19 +14,25 @@ This document describes the tools needed to build, test, and run Elemental Lifec
 
 ## Local Development
 
+1. Ensure unit tests pass:
+
+   ```sh
+   make test
+   ```
+
 1. Build the LCM manager binary:
 
    ```sh
    make build
    ```
 
-2. Install the LCM CRDs before running the controller:
+1. Install the LCM CRDs before running the controller:
 
    ```sh
    make install
    ```
 
-3. Run the LCM controller locally with webhooks disabled:
+1. Run the LCM controller locally with webhooks disabled:
 
    ```sh
    ENABLE_WEBHOOKS=false make run
@@ -34,9 +40,15 @@ This document describes the tools needed to build, test, and run Elemental Lifec
 
    > NOTE: Disabling webhooks avoids requiring the Kubernetes API server to call a webhook Service backed by a controller running outside the cluster.
 
-4. Optionally, deploy a [Release](./release-api.md) resource to trigger an [upgrade](./workflow.md) and [monitor](./monitor-and-troubleshoot.md) its progress.
+1. Optionally, deploy a [Release](./release-api.md) resource to trigger an [upgrade](./workflow.md) and [monitor](./monitor-and-troubleshoot.md) its progress.
 
 ## Cluster Deployment From Source
+
+Before proceeding with the steps below, ensure that the project's unit tests pass:
+
+```sh
+make test
+```
 
 ### Preparing the LCM Image
 
@@ -49,7 +61,7 @@ This document describes the tools needed to build, test, and run Elemental Lifec
     export CONTAINER_TOOL=podman
     ```
 
-2. Build the LCM image:
+1. Build the LCM image:
 
     ```sh
     make docker-build
@@ -57,7 +69,7 @@ This document describes the tools needed to build, test, and run Elemental Lifec
 
     > NOTE: By default, `make docker-build` builds the image for the host platform. To build for a different platform, set `PLATFORM`.
 
-3. Push the built LCM image to your registry:
+1. Push the built LCM image to your registry:
 
     ```sh
     make docker-push
@@ -79,7 +91,7 @@ These steps build the LCM container image and push it to the registry specified 
    make install
    ```
 
-2. Deploy the controller from the pre-built image:
+1. Deploy the controller from the pre-built image:
    
    ```sh
    make deploy IMG=<your-img-repo>/lcm:<tag>
@@ -97,7 +109,7 @@ These steps build the LCM container image and push it to the registry specified 
 
    > NOTE: This will produce an `install.yaml` file under the `dist/` directory.
 
-2. Deploy the consolidated LCM YAML file:
+1. Deploy the consolidated LCM YAML file:
 
    > NOTE: As a prerequisite step to this one, you can move the `install.yaml` file to an environment with access to the cluster.
 
@@ -126,7 +138,7 @@ After deploying LCM with your custom changes, deploy a [Release](./release-api.m
    make undeploy
    ```
 
-2. Uninstall LCM CRDs:
+1. Uninstall LCM CRDs:
 
    ```sh
    make uninstall
