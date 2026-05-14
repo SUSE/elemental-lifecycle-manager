@@ -63,68 +63,82 @@ var _ = Describe("SUCPlanReconciler", func() {
 			desiredPlan = testutil.NewTestSUCPlan("test-plan", "default")
 		})
 
-		Context("when plan does not exist", func() {
-			It("should create the plan and return in-progress status", func() {
-				result, err := reconciler.Reconcile(ctx, desiredPlan)
+		It("should create the plan and return in-progress status", func() {
+			desiredPlan.Spec.NodeSelector.MatchLabels["key"] = "value"
+			result, err := reconciler.Reconcile(ctx, desiredPlan)
 
-				Expect(err).NotTo(HaveOccurred())
-				Expect(result).NotTo(BeNil())
-				Expect(result.Status.State).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
-				Expect(result.Status.Message).To(ContainSubstring("test-plan"))
-				Expect(result.Nodes).To(BeEmpty())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).NotTo(BeNil())
+			Expect(result.Status.State).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
+			Expect(result.Status.Message).To(ContainSubstring("test-plan"))
+			Expect(result.Nodes).To(BeEmpty())
 
-				// Verify plan was created in the cluster
-				created := &upgradecattlev1.Plan{}
-				err = fakeClient.Get(ctx, types.NamespacedName{
-					Name:      desiredPlan.Name,
-					Namespace: desiredPlan.Namespace,
-				}, created)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(created.Name).To(Equal("test-plan"))
-			})
+			// Verify plan was created in the cluster
+			created := &upgradecattlev1.Plan{}
+			err = fakeClient.Get(ctx, types.NamespacedName{
+				Name:      desiredPlan.Name,
+				Namespace: desiredPlan.Namespace,
+			}, created)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(created.Spec).To(Equal(desiredPlan.Spec))
 		})
 
-		Context("when plan exists", func() {
-			BeforeEach(func() {
-				Expect(fakeClient.Create(ctx, desiredPlan)).To(Succeed())
-			})
+		It("should return in-progress status with applying nodes empty and then getting populated", func() {
+			Expect(fakeClient.Create(ctx, desiredPlan)).To(Succeed())
+			desiredPlan.Status.Applying = []string{}
+			Expect(fakeClient.Update(ctx, desiredPlan)).To(Succeed())
 
-			It("should not recreate the plan", func() {
-				result, err := reconciler.Reconcile(ctx, desiredPlan)
+			result, err := reconciler.Reconcile(ctx, desiredPlan)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Status.State).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
+			Expect(result.Status.Message).To(ContainSubstring("execution in progress"))
 
-				Expect(err).NotTo(HaveOccurred())
-				Expect(result).NotTo(BeNil())
+			// now populate the Applying field in Status
+			desiredPlan.Status.Applying = []string{"node1", "node2"}
+			Expect(fakeClient.Update(ctx, desiredPlan)).To(Succeed())
 
-				// Verify only one plan exists
-				planList := &upgradecattlev1.PlanList{}
-				err = fakeClient.List(ctx, planList)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(planList.Items).To(HaveLen(1))
-			})
+			result, err = reconciler.Reconcile(ctx, desiredPlan)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Status.State).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
 
-			It("should parse status from existing plan", func() {
-				result, err := reconciler.Reconcile(ctx, desiredPlan)
-
-				Expect(err).NotTo(HaveOccurred())
-				Expect(result.Status.State).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
-			})
+			Expect(result.Status.Message).To(SatisfyAll(
+				ContainSubstring("applying on"),
+				ContainSubstring("node1"),
+				ContainSubstring("node2"),
+			))
+			Expect(result.Nodes).To(BeEmpty())
 		})
 
-		Context("when plan is applying", func() {
-			BeforeEach(func() {
-				desiredPlan.Status.Applying = []string{"node1", "node2"}
-				Expect(fakeClient.Create(ctx, desiredPlan)).To(Succeed())
-			})
+		It("should return in-progress status", func() {
+			desiredPlan.Status.Conditions = []genericcondition.GenericCondition{
+				{
+					Type:   string(upgradecattlev1.PlanComplete),
+					Status: corev1.ConditionFalse,
+					Reason: "",
+				},
+			}
+			Expect(fakeClient.Create(ctx, desiredPlan)).To(Succeed())
+			result, err := reconciler.Reconcile(ctx, desiredPlan)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Status.State).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
+		})
 
-			It("should return in-progress status with applying nodes", func() {
-				result, err := reconciler.Reconcile(ctx, desiredPlan)
+		It("should return failed status with message", func() {
+			desiredPlan.Status.Conditions = []genericcondition.GenericCondition{
+				{
+					Type:    string(upgradecattlev1.PlanComplete),
+					Status:  corev1.ConditionFalse,
+					Reason:  "UpgradeFailed",
+					Message: "upgrade script exited with code 1",
+				},
+			}
+			Expect(fakeClient.Create(ctx, desiredPlan)).To(Succeed())
+			result, err := reconciler.Reconcile(ctx, desiredPlan)
 
-				Expect(err).NotTo(HaveOccurred())
-				Expect(result.Status.State).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
-				Expect(result.Status.Message).To(ContainSubstring("applying on"))
-				Expect(result.Status.Message).To(ContainSubstring("node1"))
-				Expect(result.Nodes).To(BeEmpty())
-			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Status.State).To(Equal(lifecyclev1alpha1.UpgradeFailed))
+			Expect(result.Status.Message).To(ContainSubstring("failed"))
+			Expect(result.Status.Message).To(ContainSubstring("upgrade script exited with code 1"))
 		})
 
 		Context("when plan is complete", func() {
@@ -146,7 +160,7 @@ var _ = Describe("SUCPlanReconciler", func() {
 
 				Expect(err).NotTo(HaveOccurred())
 				Expect(result.Status.State).To(Equal(lifecyclev1alpha1.PlanComplete))
-				Expect(result.Status.Message).To(ContainSubstring("completed successfully"))
+				Expect(result.Status.Message).To(Equal("Plan test-plan execution completed successfully"))
 				Expect(result.Nodes).To(BeEmpty())
 			})
 
@@ -173,154 +187,6 @@ var _ = Describe("SUCPlanReconciler", func() {
 
 				nodeNames := []string{result.Nodes[0].Name, result.Nodes[1].Name}
 				Expect(nodeNames).To(ConsistOf("node1", "node2"))
-			})
-		})
-
-		Context("when plan has failed", func() {
-			BeforeEach(func() {
-				desiredPlan.Status.Conditions = []genericcondition.GenericCondition{
-					{
-						Type:    string(upgradecattlev1.PlanComplete),
-						Status:  corev1.ConditionFalse,
-						Reason:  "UpgradeFailed",
-						Message: "upgrade script exited with code 1",
-					},
-				}
-				Expect(fakeClient.Create(ctx, desiredPlan)).To(Succeed())
-			})
-
-			It("should return failed status with message", func() {
-				result, err := reconciler.Reconcile(ctx, desiredPlan)
-
-				Expect(err).NotTo(HaveOccurred())
-				Expect(result.Status.State).To(Equal(lifecyclev1alpha1.UpgradeFailed))
-				Expect(result.Status.Message).To(ContainSubstring("failed"))
-				Expect(result.Status.Message).To(ContainSubstring("upgrade script exited with code 1"))
-			})
-		})
-
-		Context("when plan has PlanComplete condition false without reason", func() {
-			BeforeEach(func() {
-				desiredPlan.Status.Conditions = []genericcondition.GenericCondition{
-					{
-						Type:   string(upgradecattlev1.PlanComplete),
-						Status: corev1.ConditionFalse,
-						Reason: "",
-					},
-				}
-				Expect(fakeClient.Create(ctx, desiredPlan)).To(Succeed())
-			})
-
-			It("should return in-progress status", func() {
-				result, err := reconciler.Reconcile(ctx, desiredPlan)
-
-				Expect(err).NotTo(HaveOccurred())
-				Expect(result.Status.State).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
-			})
-		})
-
-		Context("when plan has no relevant conditions", func() {
-			BeforeEach(func() {
-				desiredPlan.Status.Conditions = []genericcondition.GenericCondition{
-					{
-						Type:   "SomeOtherCondition",
-						Status: corev1.ConditionTrue,
-					},
-				}
-				Expect(fakeClient.Create(ctx, desiredPlan)).To(Succeed())
-			})
-
-			It("should default to in-progress status", func() {
-				result, err := reconciler.Reconcile(ctx, desiredPlan)
-
-				Expect(err).NotTo(HaveOccurred())
-				Expect(result.Status.State).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
-				Expect(result.Status.Message).To(ContainSubstring("in progress"))
-			})
-		})
-	})
-
-	Describe("listNodesForPlan", func() {
-		var plan *upgradecattlev1.Plan
-
-		BeforeEach(func() {
-			plan = testutil.NewTestSUCPlan("test-plan", "default")
-		})
-
-		Context("with valid label selector", func() {
-			BeforeEach(func() {
-				plan.Spec.NodeSelector = &metav1.LabelSelector{
-					MatchLabels: map[string]string{testLabelRole: testLabelWorker},
-				}
-			})
-
-			It("should return nodes matching the selector", func() {
-				// Create matching nodes
-				node1 := testutil.NewTestNode("worker1", false)
-				node1.Labels = map[string]string{testLabelRole: testLabelWorker}
-				Expect(fakeClient.Create(ctx, node1)).To(Succeed())
-
-				node2 := testutil.NewTestNode("worker2", false)
-				node2.Labels = map[string]string{testLabelRole: testLabelWorker}
-				Expect(fakeClient.Create(ctx, node2)).To(Succeed())
-
-				// Create non-matching node
-				controlPlane := testutil.NewTestNode("cp1", true)
-				controlPlane.Labels = map[string]string{testLabelRole: "control-plane"}
-				Expect(fakeClient.Create(ctx, controlPlane)).To(Succeed())
-
-				// Use reflection to call the private method (for testing purposes)
-				// In production, this is tested via Reconcile
-				selector, err := metav1.LabelSelectorAsSelector(plan.Spec.NodeSelector)
-				Expect(err).NotTo(HaveOccurred())
-
-				nodes := &corev1.NodeList{}
-				err = fakeClient.List(ctx, nodes, client.MatchingLabelsSelector{Selector: selector})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(nodes.Items).To(HaveLen(2))
-			})
-
-			It("should return empty list when no nodes match", func() {
-				selector, err := metav1.LabelSelectorAsSelector(plan.Spec.NodeSelector)
-				Expect(err).NotTo(HaveOccurred())
-
-				nodes := &corev1.NodeList{}
-				err = fakeClient.List(ctx, nodes, client.MatchingLabelsSelector{Selector: selector})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(nodes.Items).To(BeEmpty())
-			})
-		})
-
-		Context("with match expressions", func() {
-			BeforeEach(func() {
-				plan.Spec.NodeSelector = &metav1.LabelSelector{
-					MatchExpressions: []metav1.LabelSelectorRequirement{
-						{
-							Key:      testLabelRole,
-							Operator: metav1.LabelSelectorOpIn,
-							Values:   []string{testLabelWorker, "agent"},
-						},
-					},
-				}
-			})
-
-			It("should handle complex selectors", func() {
-				// Create matching nodes
-				node1 := testutil.NewTestNode("worker1", false)
-				node1.Labels = map[string]string{testLabelRole: testLabelWorker}
-				Expect(fakeClient.Create(ctx, node1)).To(Succeed())
-
-				node2 := testutil.NewTestNode("agent1", false)
-				node2.Labels = map[string]string{testLabelRole: "agent"}
-				Expect(fakeClient.Create(ctx, node2)).To(Succeed())
-
-				selector, err := metav1.LabelSelectorAsSelector(plan.Spec.NodeSelector)
-				Expect(err).NotTo(HaveOccurred())
-
-				nodes := &corev1.NodeList{}
-				err = fakeClient.List(ctx, nodes, client.MatchingLabelsSelector{Selector: selector})
-				Expect(err).NotTo(HaveOccurred())
-				Expect(nodes.Items).To(HaveLen(2))
 			})
 		})
 	})

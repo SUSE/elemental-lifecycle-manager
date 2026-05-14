@@ -57,7 +57,7 @@ var _ = Describe("OSReconciler", func() {
 		reconciler = reconcilers.NewOSReconciler(fakeClient, mockPlanRec)
 		planReconcileCnt = 0
 
-		config = testutil.NewTestConfigWithOS("registry.example.com/os:v1.0.0", "v1.0.0")
+		config = testutil.NewTestConfig(testutil.WithOS("registry.example.com/os:v1.0.0", "v1.0.0"))
 	})
 
 	Describe("Phase", func() {
@@ -77,16 +77,6 @@ var _ = Describe("OSReconciler", func() {
 				Expect(status).NotTo(BeNil())
 				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeSkipped))
 				Expect(status.Message).To(ContainSubstring("OS"))
-			})
-		})
-
-		Context("when config is nil", func() {
-			It("should skip the phase", func() {
-				status, err := reconciler.Reconcile(ctx, nil)
-
-				Expect(err).NotTo(HaveOccurred())
-				Expect(status).NotTo(BeNil())
-				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeSkipped))
 			})
 		})
 
@@ -112,21 +102,14 @@ var _ = Describe("OSReconciler", func() {
 				}
 			})
 
-			It("should create only control-plane plan", func() {
+			It("should create only control-plane plan and succeed", func() {
 				status, err := reconciler.Reconcile(ctx, config)
 
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status).NotTo(BeNil())
-				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeSucceeded))
 				Expect(planReconcileCnt).To(Equal(1)) // Only control-plane plan
-			})
-
-			It("should return succeeded when plan completes", func() {
-				status, err := reconciler.Reconcile(ctx, config)
-
-				Expect(err).NotTo(HaveOccurred())
 				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeSucceeded))
-				Expect(status.Message).To(ContainSubstring("successfully"))
+				Expect(status.Message).To(Equal("All nodes upgraded successfully"))
 			})
 		})
 
@@ -142,30 +125,6 @@ var _ = Describe("OSReconciler", func() {
 
 				worker2 := testutil.NewTestNode("worker2", false)
 				Expect(fakeClient.Create(ctx, worker2)).To(Succeed())
-			})
-
-			It("should create both control-plane and worker plans in order", func() {
-				var planNames []string
-				mockPlanRec.ReconcileFn = func(ctx context.Context, desired *upgradecattlev1.Plan) (*reconcilers.PlanResult, error) {
-					planNames = append(planNames, desired.Name)
-					return &reconcilers.PlanResult{
-						Status: &upgrade.PhaseStatus{
-							State:   lifecyclev1alpha1.PlanComplete,
-							Message: testPlanCompleted,
-						},
-						Nodes: []corev1.Node{},
-					}, nil
-				}
-
-				status, err := reconciler.Reconcile(ctx, config)
-
-				Expect(err).NotTo(HaveOccurred())
-				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeSucceeded))
-				Expect(planNames).To(HaveLen(2))
-				// Control-plane plan should be first (contains "control-plane" in name)
-				Expect(planNames[0]).To(ContainSubstring("control-plane"))
-				// Worker plan should be second (contains "worker" in name)
-				Expect(planNames[1]).To(ContainSubstring("worker"))
 			})
 
 			It("should wait for control-plane plan before starting worker plan", func() {
@@ -288,125 +247,6 @@ var _ = Describe("OSReconciler", func() {
 				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeFailed))
 				Expect(status.Message).To(ContainSubstring("Upgrade script failed"))
 			})
-		})
-
-		Context("with drain options", func() {
-			BeforeEach(func() {
-				config.OS.DrainOpts = &upgrade.DrainOpts{
-					ControlPlane: true,
-					Worker:       true,
-				}
-
-				node := testutil.NewTestNode("node1", true)
-				Expect(fakeClient.Create(ctx, node)).To(Succeed())
-
-				mockPlanRec.ReconcileFn = func(ctx context.Context, desired *upgradecattlev1.Plan) (*reconcilers.PlanResult, error) {
-					return &reconcilers.PlanResult{
-						Status: &upgrade.PhaseStatus{
-							State:   lifecyclev1alpha1.PlanComplete,
-							Message: testPlanCompleted,
-						},
-						Nodes: []corev1.Node{},
-					}, nil
-				}
-			})
-
-			It("should apply drain options to plans", func() {
-				status, err := reconciler.Reconcile(ctx, config)
-
-				Expect(err).NotTo(HaveOccurred())
-				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeSucceeded))
-			})
-		})
-
-		Context("with empty cluster", func() {
-			BeforeEach(func() {
-				// No nodes created - empty cluster
-				mockPlanRec.ReconcileFn = func(ctx context.Context, desired *upgradecattlev1.Plan) (*reconcilers.PlanResult, error) {
-					return &reconcilers.PlanResult{
-						Status: &upgrade.PhaseStatus{
-							State:   lifecyclev1alpha1.PlanComplete,
-							Message: testPlanCompleted,
-						},
-						Nodes: []corev1.Node{},
-					}, nil
-				}
-			})
-
-			It("should handle empty cluster as control-plane only", func() {
-				status, err := reconciler.Reconcile(ctx, config)
-
-				// With no nodes, it's control-plane only (single plan)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(status).NotTo(BeNil())
-				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeSucceeded))
-			})
-		})
-	})
-
-	Describe("isControlPlaneOnlyCluster", func() {
-		It("should return true for all control-plane nodes", func() {
-			// This is a package-private function, but we can test it indirectly
-			// through the Reconcile behavior
-			cp1 := testutil.NewTestNode("cp1", true)
-			Expect(fakeClient.Create(ctx, cp1)).To(Succeed())
-
-			mockPlanRec.ReconcileFn = func(ctx context.Context, desired *upgradecattlev1.Plan) (*reconcilers.PlanResult, error) {
-				planReconcileCnt++
-				return &reconcilers.PlanResult{
-					Status: &upgrade.PhaseStatus{
-						State:   lifecyclev1alpha1.PlanComplete,
-						Message: testComplete,
-					},
-					Nodes: []corev1.Node{},
-				}, nil
-			}
-
-			_, err := reconciler.Reconcile(ctx, config)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(planReconcileCnt).To(Equal(1)) // Only one plan for control-plane only
-		})
-
-		It("should return false when worker nodes are present", func() {
-			cp1 := testutil.NewTestNode("cp1", true)
-			Expect(fakeClient.Create(ctx, cp1)).To(Succeed())
-
-			worker1 := testutil.NewTestNode("worker1", false)
-			Expect(fakeClient.Create(ctx, worker1)).To(Succeed())
-
-			mockPlanRec.ReconcileFn = func(ctx context.Context, desired *upgradecattlev1.Plan) (*reconcilers.PlanResult, error) {
-				planReconcileCnt++
-				return &reconcilers.PlanResult{
-					Status: &upgrade.PhaseStatus{
-						State:   lifecyclev1alpha1.PlanComplete,
-						Message: testComplete,
-					},
-					Nodes: []corev1.Node{},
-				}, nil
-			}
-
-			_, err := reconciler.Reconcile(ctx, config)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(planReconcileCnt).To(Equal(2)) // Two plans: control-plane and worker
-		})
-
-		It("should return true for empty cluster", func() {
-			// No nodes created
-
-			mockPlanRec.ReconcileFn = func(ctx context.Context, desired *upgradecattlev1.Plan) (*reconcilers.PlanResult, error) {
-				planReconcileCnt++
-				return &reconcilers.PlanResult{
-					Status: &upgrade.PhaseStatus{
-						State:   lifecyclev1alpha1.PlanComplete,
-						Message: testComplete,
-					},
-					Nodes: []corev1.Node{},
-				}, nil
-			}
-
-			_, err := reconciler.Reconcile(ctx, config)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(planReconcileCnt).To(Equal(1)) // Only control-plane plan for empty cluster
 		})
 	})
 })

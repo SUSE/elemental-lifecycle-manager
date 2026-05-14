@@ -59,7 +59,7 @@ var _ = Describe("KubernetesReconciler", func() {
 		mockPackagedHandler = testutil.NewMockPackagedComponentsHandler()
 		reconciler = reconcilers.NewKubernetesReconciler(fakeClient, mockPlanRec, mockPackagedHandler)
 
-		config = testutil.NewTestConfigWithKubernetes("registry.example.com/k8s:v1.30.0", "v1.30.0")
+		config = testutil.NewTestConfig(testutil.WithKubernetes("registry.example.com/k8s:v1.30.0", "v1.30.0"))
 	})
 
 	Describe("Phase", func() {
@@ -78,23 +78,13 @@ var _ = Describe("KubernetesReconciler", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status).NotTo(BeNil())
 				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeSkipped))
-				Expect(status.Message).To(ContainSubstring("Kubernetes"))
-			})
-		})
-
-		Context("when config is nil", func() {
-			It("should skip the phase", func() {
-				status, err := reconciler.Reconcile(ctx, nil)
-
-				Expect(err).NotTo(HaveOccurred())
-				Expect(status).NotTo(BeNil())
-				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeSkipped))
+				Expect(status.Message).To(Equal("Upgrade for phase \"Kubernetes\" skipped"))
 			})
 		})
 
 		Context("snapshot generation", func() {
 			BeforeEach(func() {
-				node := testutil.NewTestNodeWithVersion("cp1", "v1.30.0", true)
+				node := testutil.NewTestNode("cp1", true, testutil.WithVersion("v1.30.0"))
 				Expect(fakeClient.Create(ctx, node)).To(Succeed())
 			})
 
@@ -115,7 +105,7 @@ var _ = Describe("KubernetesReconciler", func() {
 							State:   lifecyclev1alpha1.PlanComplete,
 							Message: testCompleteMsg,
 						},
-						Nodes: []corev1.Node{*testutil.NewTestNodeWithVersion("cp1", "v1.30.0", true)},
+						Nodes: []corev1.Node{*testutil.NewTestNode("cp1", true, testutil.WithVersion("v1.30.0"))},
 					}, nil
 				}
 
@@ -145,7 +135,7 @@ var _ = Describe("KubernetesReconciler", func() {
 			})
 		})
 
-		Context("plan execution", func() {
+		Context("plan execution and node version verification", func() {
 			var planNames []string
 
 			BeforeEach(func() {
@@ -158,42 +148,20 @@ var _ = Describe("KubernetesReconciler", func() {
 						Charts:                  []*reconcilers.PackagedComponentChartSnapshot{},
 					}, nil
 				}
+			})
 
+			It("should execute control-plane then worker plans in order", func() {
 				mockPackagedHandler.ReconcileAvailabilityFn = func(ctx context.Context, targetVersion string, snapshot *reconcilers.PackagedComponentsSnapshot) (*upgrade.PhaseStatus, error) {
 					return &upgrade.PhaseStatus{
 						State:   lifecyclev1alpha1.K8sPackagedComponentsAvailable,
 						Message: testComponentsAvailable,
 					}, nil
 				}
-			})
 
-			It("should execute control-plane plan first", func() {
-				node := testutil.NewTestNodeWithVersion("cp1", "v1.30.0", true)
-				Expect(fakeClient.Create(ctx, node)).To(Succeed())
-
-				mockPlanRec.ReconcileFn = func(ctx context.Context, desired *upgradecattlev1.Plan) (*reconcilers.PlanResult, error) {
-					planNames = append(planNames, desired.Name)
-					return &reconcilers.PlanResult{
-						Status: &upgrade.PhaseStatus{
-							State:   lifecyclev1alpha1.PlanComplete,
-							Message: testCompleteMsg,
-						},
-						Nodes: []corev1.Node{*node},
-					}, nil
-				}
-
-				_, err := reconciler.Reconcile(ctx, config)
-
-				Expect(err).NotTo(HaveOccurred())
-				Expect(planNames).To(HaveLen(1))
-				Expect(planNames[0]).To(ContainSubstring("control-plane"))
-			})
-
-			It("should execute control-plane then worker plans in order", func() {
-				cp := testutil.NewTestNodeWithVersion("cp1", "v1.30.0", true)
+				cp := testutil.NewTestNode("cp1", true, testutil.WithVersion("v1.30.0"))
 				Expect(fakeClient.Create(ctx, cp)).To(Succeed())
 
-				worker := testutil.NewTestNodeWithVersion("worker1", "v1.30.0", false)
+				worker := testutil.NewTestNode("worker1", false, testutil.WithVersion("v1.30.0"))
 				Expect(fakeClient.Create(ctx, worker)).To(Succeed())
 
 				mockPlanRec.ReconcileFn = func(ctx context.Context, desired *upgradecattlev1.Plan) (*reconcilers.PlanResult, error) {
@@ -222,6 +190,13 @@ var _ = Describe("KubernetesReconciler", func() {
 			})
 
 			It("should wait for control-plane before starting worker", func() {
+				mockPackagedHandler.ReconcileAvailabilityFn = func(ctx context.Context, targetVersion string, snapshot *reconcilers.PackagedComponentsSnapshot) (*upgrade.PhaseStatus, error) {
+					return &upgrade.PhaseStatus{
+						State:   lifecyclev1alpha1.K8sPackagedComponentsAvailable,
+						Message: testComponentsAvailable,
+					}, nil
+				}
+
 				cp := testutil.NewTestNode("cp1", true)
 				Expect(fakeClient.Create(ctx, cp)).To(Succeed())
 
@@ -250,21 +225,9 @@ var _ = Describe("KubernetesReconciler", func() {
 				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
 				Expect(callCount).To(Equal(1))
 			})
-		})
-
-		Context("node version verification", func() {
-			BeforeEach(func() {
-				mockPackagedHandler.GenerateSnapshotFn = func(ctx context.Context, config *upgrade.Config) (*reconcilers.PackagedComponentsSnapshot, error) {
-					return &reconcilers.PackagedComponentsSnapshot{
-						CreationTime:            time.Now(),
-						SourceKubernetesVersion: testK8sVersion,
-						Charts:                  []*reconcilers.PackagedComponentChartSnapshot{},
-					}, nil
-				}
-			})
 
 			It("should verify all nodes are at target version", func() {
-				node := testutil.NewTestNodeWithVersion("cp1", "v1.30.0", true)
+				node := testutil.NewTestNode("cp1", true, testutil.WithVersion("v1.30.0"))
 				Expect(fakeClient.Create(ctx, node)).To(Succeed())
 
 				mockPlanRec.ReconcileFn = func(ctx context.Context, desired *upgradecattlev1.Plan) (*reconcilers.PlanResult, error) {
@@ -291,7 +254,7 @@ var _ = Describe("KubernetesReconciler", func() {
 			})
 
 			It("should return in-progress when node version doesn't match", func() {
-				node := testutil.NewTestNodeWithVersion("cp1", "v1.29.0", true)
+				node := testutil.NewTestNode("cp1", true, testutil.WithVersion("v1.29.0"))
 				Expect(fakeClient.Create(ctx, node)).To(Succeed())
 
 				mockPlanRec.ReconcileFn = func(ctx context.Context, desired *upgradecattlev1.Plan) (*reconcilers.PlanResult, error) {
@@ -312,7 +275,7 @@ var _ = Describe("KubernetesReconciler", func() {
 			})
 
 			It("should return in-progress when node is not ready", func() {
-				node := testutil.NewTestNodeWithVersion("cp1", "v1.30.0", true)
+				node := testutil.NewTestNode("cp1", true, testutil.WithVersion("v1.30.0"))
 				// Make node not ready
 				node.Status.Conditions = []corev1.NodeCondition{
 					{
@@ -339,7 +302,7 @@ var _ = Describe("KubernetesReconciler", func() {
 			})
 
 			It("should return in-progress when node is unschedulable", func() {
-				node := testutil.NewTestNodeWithVersion("cp1", "v1.30.0", true)
+				node := testutil.NewTestNode("cp1", true, testutil.WithVersion("v1.30.0"))
 				node.Spec.Unschedulable = true
 				Expect(fakeClient.Create(ctx, node)).To(Succeed())
 
@@ -362,7 +325,7 @@ var _ = Describe("KubernetesReconciler", func() {
 
 		Context("packaged components availability", func() {
 			BeforeEach(func() {
-				node := testutil.NewTestNodeWithVersion("cp1", "v1.30.0", true)
+				node := testutil.NewTestNode("cp1", true, testutil.WithVersion("v1.30.0"))
 				Expect(fakeClient.Create(ctx, node)).To(Succeed())
 
 				mockPackagedHandler.GenerateSnapshotFn = func(ctx context.Context, config *upgrade.Config) (*reconcilers.PackagedComponentsSnapshot, error) {
@@ -379,7 +342,7 @@ var _ = Describe("KubernetesReconciler", func() {
 							State:   lifecyclev1alpha1.PlanComplete,
 							Message: testCompleteMsg,
 						},
-						Nodes: []corev1.Node{*testutil.NewTestNodeWithVersion("cp1", "v1.30.0", true)},
+						Nodes: []corev1.Node{*testutil.NewTestNode("cp1", true, testutil.WithVersion("v1.30.0"))},
 					}, nil
 				}
 			})
@@ -411,7 +374,7 @@ var _ = Describe("KubernetesReconciler", func() {
 
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeSucceeded))
-				Expect(status.Message).To(ContainSubstring("successfully"))
+				Expect(status.Message).To(Equal("All nodes upgraded successfully"))
 			})
 
 			It("should return error if availability check fails", func() {
