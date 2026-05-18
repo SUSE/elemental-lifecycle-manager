@@ -22,7 +22,9 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/url"
 	"slices"
+	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -261,7 +263,10 @@ func (r *HelmReconciler) createHelmChartFromRelease(ctx context.Context, chart *
 
 // updateHelmChart updates an existing HelmChart CR to trigger an upgrade.
 func (r *HelmReconciler) updateHelmChart(ctx context.Context, chart *api.HelmChart, existing *helmv1.HelmChart) error {
-	repoURL := r.resolveRepositoryURL(chart)
+	repoURL, err := r.resolveRepositoryURL(chart)
+	if err != nil {
+		return fmt.Errorf("parsing repository URL for chart %q: %w", chart.Name, err)
+	}
 
 	// Ensure labels are set for Release tracking
 	if existing.Labels == nil {
@@ -270,9 +275,16 @@ func (r *HelmReconciler) updateHelmChart(ctx context.Context, chart *api.HelmCha
 	existing.Labels[lifecyclev1alpha1.ReleaseNameLabel] = r.releaseName
 	existing.Labels[lifecyclev1alpha1.ReleaseVersionLabel] = lifecyclev1alpha1.SanitizeVersion(r.releaseVersion)
 
-	existing.Spec.Chart = chart.Chart
 	existing.Spec.Version = chart.Version
-	existing.Spec.Repo = repoURL
+	if repoURL.Scheme == "oci" {
+		// HelmChart's referencing OCI images expect the full OCI reference to be
+		// specified under Spec.Chart and for Spec.Repo to be empty.
+		existing.Spec.Chart = fmt.Sprintf("%s/%s", strings.TrimSuffix(repoURL.String(), "/"), chart.Chart)
+		existing.Spec.Repo = ""
+	} else {
+		existing.Spec.Chart = chart.Chart
+		existing.Spec.Repo = repoURL.String()
+	}
 
 	// Merge existing values with new manifest values
 	if len(chart.Values) > 0 {
@@ -297,7 +309,10 @@ func (r *HelmReconciler) updateHelmChart(ctx context.Context, chart *api.HelmCha
 // buildHelmChart creates a HelmChart resource from the manifest chart definition.
 func (r *HelmReconciler) buildHelmChart(chart *api.HelmChart, targetNamespace string) (*helmv1.HelmChart, error) {
 	name := chart.GetName()
-	repoURL := r.resolveRepositoryURL(chart)
+	repoURL, err := r.resolveRepositoryURL(chart)
+	if err != nil {
+		return nil, fmt.Errorf("parsing repository URL for chart %q: %w", chart.Name, err)
+	}
 
 	if targetNamespace == "" {
 		targetNamespace = chart.Namespace
@@ -319,12 +334,20 @@ func (r *HelmReconciler) buildHelmChart(chart *api.HelmChart, targetNamespace st
 			},
 		},
 		Spec: helmv1.HelmChartSpec{
-			Chart:           chart.Chart,
 			Version:         chart.Version,
-			Repo:            repoURL,
 			TargetNamespace: targetNamespace,
 			BackOffLimit:    &backoffLimit,
 		},
+	}
+
+	if repoURL.Scheme == "oci" {
+		// HelmChart's referencing OCI images expect the full OCI reference to be
+		// specified under Spec.Chart and for Spec.Repo to be empty.
+		helmChart.Spec.Chart = fmt.Sprintf("%s/%s", strings.TrimSuffix(repoURL.String(), "/"), chart.Chart)
+		helmChart.Spec.Repo = ""
+	} else {
+		helmChart.Spec.Chart = chart.Chart
+		helmChart.Spec.Repo = repoURL.String()
 	}
 
 	if len(chart.Values) > 0 {
@@ -338,20 +361,14 @@ func (r *HelmReconciler) buildHelmChart(chart *api.HelmChart, targetNamespace st
 	return helmChart, nil
 }
 
-// resolveRepositoryURL resolves the repository URL for a chart.
-func (r *HelmReconciler) resolveRepositoryURL(chart *api.HelmChart) string {
-	repoName := chart.GetRepositoryName()
-	if repoName != "" {
-		if url, ok := r.repositoryURLs[repoName]; ok {
-			return url
-		}
+// resolveRepositoryURL resolves and parses the repository URL for a chart.
+func (r *HelmReconciler) resolveRepositoryURL(chart *api.HelmChart) (*url.URL, error) {
+	repositoryURL := chart.Repository
+	if resolvedURL, ok := r.repositoryURLs[repositoryURL]; ok {
+		repositoryURL = resolvedURL
 	}
 
-	if chart.Repository != "" {
-		return chart.Repository
-	}
-
-	return ""
+	return url.Parse(repositoryURL)
 }
 
 // evaluateHelmChartJobStatus checks the status of the Helm upgrade job.
