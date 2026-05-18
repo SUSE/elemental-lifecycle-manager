@@ -37,6 +37,12 @@ LCM facilitates additional component upgrades by using the [Helm Controller](htt
 RKE2 clusters have this controller built-in. It is enabled by default and users of LCM should ensure that it is not manually
 disabled via the respective CLI argument or config file parameter.
 
+## Limitations
+
+-  Issue: [#28](https://github.com/SUSE/elemental-lifecycle-manager/issues/28). Private Helm charts can be upgraded only when they are managed by the Helm Controller. If the chart was deployed directly through Helm (e.g. `helm install`), first create a [`HelmChart`](https://github.com/k3s-io/helm-controller/blob/master/doc/helmchart.md#HelmChart) resource with the required repository credentials before scheduling the upgrade through LCM.
+
+-  Issue: [#28](https://github.com/SUSE/elemental-lifecycle-manager/issues/28). Helm chart upgrades that switch the chart from a public to a private reference are not handled automatically. Before scheduling the upgrade, configure the chart's corresponding [`HelmChart`](https://github.com/k3s-io/helm-controller/blob/master/doc/helmchart.md#HelmChart) resoruce to include the required credentials for the private reference.
+
 ## Quickstart
 
 ### Install Elemental Lifecycle Manager
