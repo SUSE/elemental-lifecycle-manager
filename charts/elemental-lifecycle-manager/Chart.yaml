@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+#!BuildTag: beta/uc/elemental-lifecycle-manager:latest
+#!BuildTag: beta/uc/elemental-lifecycle-manager:0.1.0
+
 apiVersion: v2
 name: elemental-lifecycle-manager
 description: A Helm chart for the Elemental Lifecycle Manager
