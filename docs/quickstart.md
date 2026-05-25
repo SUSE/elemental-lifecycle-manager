@@ -41,7 +41,7 @@ Elemental Lifecycle Manager (LCM) can be easily installed through its OCI contai
       --namespace elemental-system
     ```
 
-For more information on chart deployment and customization, refer to the [Helm Chart Reference](docs/helm-chart-ref.md) guide.
+For more information on chart deployment and customization, refer to the [Helm Chart Reference](./helm-chart-ref.md) guide.
 
 ## Trigger an Upgrade Process
 
@@ -65,4 +65,4 @@ Where:
 - `${RELEASE_VERSION}` is the version of your [release manifest](https://github.com/SUSE/elemental/blob/main/docs/release-manifest.md).
 - `${RELEASE_REGISTRY_URL}` is the registry from where LCM will retrieve this manifest version
 
-For more details about the `Release` API, upgrade workflow, and monitoring or troubleshooting steps, see the [Guides](#guides) section.
+For more details about the `Release` API, upgrade workflow, and monitoring or troubleshooting steps, see the [Guides](./index.md#guides) section.
