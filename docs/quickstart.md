@@ -1,26 +1,6 @@
 # Quickstart
 
-## Requirements
-
-### System Upgrade Controller (SUC)
-
-Elemental Lifecycle Manager (LCM) utilizes [System Upgrade Controller](https://github.com/rancher/system-upgrade-controller)
-to facilitate operating system and Kubernetes upgrades on each cluster node.
-
-SUC can be deployed in one of the following ways:
-
-* Manually deploying the `system-upgrade-controller.yaml` file from the desired [SUC release](https://github.com/rancher/system-upgrade-controller/releases).
-* Through the SUC chart located under the https://charts.rancher.io Helm repository.
-* By deploying Rancher - SUC is typically included as part of the default Rancher setup.
-
-> IMPORTANT: SUC must be deployed in the `cattle-system` namespace.
-
-### Helm Controller
-
-LCM facilitates additional component upgrades by using the [Helm Controller](https://github.com/k3s-io/helm-controller).
-
-RKE2 clusters have this controller built-in. It is enabled by default and users of LCM should ensure that it is not manually
-disabled via the respective CLI argument or config file parameter.
+Before installing LCM, make sure you have fulfilled the requirements described in the [Requirements section](./index.md#requirements).
 
 ## Install Elemental Lifecycle Manager
 
