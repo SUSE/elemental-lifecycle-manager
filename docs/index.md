@@ -11,8 +11,7 @@ LCM can upgrade the following components:
 
 Users define the desired component state with a [`Release`](./release-api.md) resource, and the controller reconciles the environment until it matches that state.
 
-> [!TIP]
-> Before diving into LCM, it is essential to learn more about the Elemental toolset from its [homepage](https://suse.github.io/elemental).
+> NOTE: Before diving into LCM, it is essential to learn more about the Elemental toolset from its [homepage](https://suse.github.io/elemental).
 
 ## Requirements
 
@@ -26,7 +25,7 @@ SUC can be deployed in one of the following ways:
 * Through the SUC chart located under the https://charts.rancher.io Helm repository.
 * By deploying Rancher - SUC is typically included as part of the default Rancher setup.
 
-> IMPORTANT: SUC must be deployed in the `cattle-system` namespace.
+> NOTE: SUC must be deployed in the `cattle-system` namespace.
 
 ### Helm Controller
 
