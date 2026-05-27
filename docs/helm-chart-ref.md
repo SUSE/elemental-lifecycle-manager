@@ -37,7 +37,7 @@ This section shows how to deploy the LCM charts with their default configuration
 1. Install `elemental-lifecycle-manager-crds`:
    ```sh
    helm install elemental-lifecycle-manager-crds \
-    oci://registry.suse.com/beta/uc/elemental-lifecycle-manager-crds \
+    oci://registry.suse.com/elemental/elemental-lifecycle-manager-crds \
     --namespace elemental-system \
     --create-namespace \
     --version 0.1.0
@@ -46,9 +46,9 @@ This section shows how to deploy the LCM charts with their default configuration
 1. Install `elemental-lifecycle-manager`:
    ```sh
    helm install elemental-lifecycle-manager \
-    oci://registry.suse.com/beta/uc/elemental-lifecycle-manager \
+    oci://registry.suse.com/elemental/elemental-lifecycle-manager \
     --version 0.1.0 \
-    --namespace elemental-system \
+    --namespace elemental-system
    ```
 
 ## `elemental-lifecycle-manager` Chart Options
@@ -69,7 +69,7 @@ Since the `elemental-lifecycle-manager-crds` chart does not expose any configura
 | `healthProbe.readiness.initialDelaySeconds`  | 5                                                               | `int` - Overrides the default initial delay, in seconds, before the LCM readiness probe starts. |
 | `healthProbe.readiness.periodSeconds`        | 10                                                              | `int` - Overrides the default interval, in seconds, between LCM readiness probe checks. |
 | `image.pullPolicy`                           | "IfNotPresent"                                                  | `string` - Overrides the default pull policy for the LCM image. |
-| `image.repository`                           | registry.suse.com/beta/uc/elemental-lifecycle-manager           | `string` - Overrides the default LCM image repository. |
+| `image.repository`                           | registry.suse.com/elemental/elemental-lifecycle-manager           | `string` - Overrides the default LCM image repository. |
 | `image.tag`                                  | ""                                                              | `string` - Overrides the LCM container image tag. Defaults to .Chart.appVersion. |
 | `imagePullSecrets`                           | []                                                              | `list` - Adds image pull secrets to the LCM Pod. |
 | `metrics.cert.createDefault`                 | true                                                            | `bool` - Overrides whether LCM uses cert-manager to generate a self-signed serving certificate for the metrics server when metrics are enabled and secure metrics are used. |
@@ -193,7 +193,11 @@ kubectl create secret tls lcm-serving-cert \
 Install the CRDs chart first:
 
 ```sh
-helm install elemental-lifecycle-manager-crds ./charts/elemental-lifecycle-manager-crds
+helm install elemental-lifecycle-manager-crds \
+    oci://registry.suse.com/elemental/elemental-lifecycle-manager-crds \
+    --namespace elemental-system \
+    --create-namespace \
+    --version 0.1.0
 ```
 
 Setup a custom values file that overrides the default certificate configuration for the `webhook` and `metrics` services. 
@@ -223,9 +227,10 @@ Then install the LCM chart with the custom values file:
 
 ```sh
 helm install elemental-lifecycle-manager \
-  ./charts/elemental-lifecycle-manager \
-  --namespace elemental-system \
-  --values custom-certs-values.yaml
+    oci://registry.suse.com/elemental/elemental-lifecycle-manager \
+    --version 0.1.0 \
+    --namespace elemental-system \
+    --values custom-certs-values.yaml
 ```
 
 With this configuration, the chart mounts `lcm-serving-cert` for both the `webhook` and secure `metrics` endpoints, while also ensuring that the webhook certificate is verified by the Kubernetes API server using `webhook.cert.caBundle`. The metrics certificate is served by LCM on the metrics endpoint; metrics clients must trust the CA that signed the certificate.

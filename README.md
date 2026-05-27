@@ -52,7 +52,7 @@ Elemental Lifecycle Manager (LCM) can be easily installed through its OCI contai
 1. Install LCM CRDs:
     ```sh
     helm install elemental-lifecycle-manager-crds \
-      oci://registry.suse.com/beta/uc/elemental-lifecycle-manager-crds \
+      oci://registry.suse.com/elemental/elemental-lifecycle-manager-crds \
       --namespace elemental-system \
       --create-namespace
     ```
@@ -60,7 +60,7 @@ Elemental Lifecycle Manager (LCM) can be easily installed through its OCI contai
 2. Install LCM chart:
     ```sh
     helm install elemental-lifecycle-manager \
-      oci://registry.suse.com/beta/uc/elemental-lifecycle-manager \
+      oci://registry.suse.com/elemental/elemental-lifecycle-manager \
       --namespace elemental-system
     ```
 
