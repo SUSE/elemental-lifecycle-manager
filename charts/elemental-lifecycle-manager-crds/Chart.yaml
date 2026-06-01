@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
-#!BuildTag: beta/uc/elemental-lifecycle-manager-crds:latest
-#!BuildTag: beta/uc/elemental-lifecycle-manager-crds:0.1.0
+#!BuildTag: beta/uc/charts/elemental-lifecycle-manager-crds:latest
+#!BuildTag: beta/uc/charts/elemental-lifecycle-manager-crds:0.2.0
 
 apiVersion: v2
 name: elemental-lifecycle-manager-crds
 description: Custom Resource Definitions (CRDs) for the Elemental Lifecycle Manager
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.2.0
+appVersion: "0.2.0"

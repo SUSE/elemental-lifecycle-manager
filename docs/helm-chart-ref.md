@@ -37,7 +37,7 @@ This section shows how to deploy the LCM charts with their default configuration
 1. Install `elemental-lifecycle-manager-crds`:
    ```sh
    helm install elemental-lifecycle-manager-crds \
-    oci://registry.suse.com/elemental/elemental-lifecycle-manager-crds \
+    oci://registry.suse.com/elemental/charts/elemental-lifecycle-manager-crds \
     --namespace elemental-system \
     --create-namespace \
     --version 0.1.0
@@ -46,7 +46,7 @@ This section shows how to deploy the LCM charts with their default configuration
 1. Install `elemental-lifecycle-manager`:
    ```sh
    helm install elemental-lifecycle-manager \
-    oci://registry.suse.com/elemental/elemental-lifecycle-manager \
+    oci://registry.suse.com/elemental/charts/elemental-lifecycle-manager \
     --version 0.1.0 \
     --namespace elemental-system
    ```
@@ -194,7 +194,7 @@ Install the CRDs chart first:
 
 ```sh
 helm install elemental-lifecycle-manager-crds \
-    oci://registry.suse.com/elemental/elemental-lifecycle-manager-crds \
+    oci://registry.suse.com/elemental/charts/elemental-lifecycle-manager-crds \
     --namespace elemental-system \
     --create-namespace \
     --version 0.1.0
@@ -227,7 +227,7 @@ Then install the LCM chart with the custom values file:
 
 ```sh
 helm install elemental-lifecycle-manager \
-    oci://registry.suse.com/elemental/elemental-lifecycle-manager \
+    oci://registry.suse.com/elemental/charts/elemental-lifecycle-manager \
     --version 0.1.0 \
     --namespace elemental-system \
     --values custom-certs-values.yaml
