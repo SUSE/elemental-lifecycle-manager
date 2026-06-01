@@ -108,18 +108,18 @@ func NewConfig(manifest *resolver.ResolvedManifest, releaseVersion string, relea
 		DrainOpts: drainOpts,
 	}
 
-	if manifest.ProductExtension == nil {
+	if manifest.SolutionExtension == nil {
 		config.HelmCharts = helmChartConfig(core.Components.Helm, nil)
 	} else {
-		product := manifest.ProductExtension
-		config.HelmCharts = helmChartConfig(core.Components.Helm, product.Components.Helm)
+		solution := manifest.SolutionExtension
+		config.HelmCharts = helmChartConfig(core.Components.Helm, solution.Components.Helm)
 	}
 
 	return config, nil
 }
 
-// helmChartConfig merges Helm configurations from core and product manifests.
-func helmChartConfig(core, product *api.Helm) *HelmChartConfig {
+// helmChartConfig merges Helm configurations from core and solution manifests.
+func helmChartConfig(core, solution *api.Helm) *HelmChartConfig {
 	config := &HelmChartConfig{
 		Charts:       make([]*api.HelmChart, 0),
 		Repositories: make([]*api.HelmRepository, 0),
@@ -131,10 +131,10 @@ func helmChartConfig(core, product *api.Helm) *HelmChartConfig {
 		config.Repositories = append(config.Repositories, core.Repositories...)
 	}
 
-	// Add product charts and repositories
-	if product != nil {
-		config.Charts = append(config.Charts, product.Charts...)
-		config.Repositories = append(config.Repositories, product.Repositories...)
+	// Add solution charts and repositories
+	if solution != nil {
+		config.Charts = append(config.Charts, solution.Charts...)
+		config.Repositories = append(config.Repositories, solution.Repositories...)
 	}
 
 	if len(config.Charts) == 0 && len(config.Repositories) == 0 {
