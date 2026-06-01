@@ -5,7 +5,7 @@
 
 ## Description
 
-Elemental Lifecycle Manager (LCM) is a Kubernetes controller that upgrades environments booted from images customized with the [SUSE/elemental](https://github.com/SUSE/elemental/tree/main) toolset.
+Elemental Lifecycle Manager (LCM) is a Kubernetes controller that upgrades environments booted from images customized with the [SUSE/elemental](https://github.com/SUSE/elemental/) toolset.
 
 
 It can upgrade the following components:
@@ -52,16 +52,18 @@ Elemental Lifecycle Manager (LCM) can be easily installed through its OCI contai
 1. Install LCM CRDs:
     ```sh
     helm install elemental-lifecycle-manager-crds \
-      oci://registry.suse.com/elemental/elemental-lifecycle-manager-crds \
+      oci://registry.suse.com/elemental/charts/elemental-lifecycle-manager-crds \
       --namespace elemental-system \
-      --create-namespace
+      --create-namespace \
+      --version 0.1.0
     ```
 
 2. Install LCM chart:
     ```sh
     helm install elemental-lifecycle-manager \
-      oci://registry.suse.com/elemental/elemental-lifecycle-manager \
-      --namespace elemental-system
+      oci://registry.suse.com/elemental/charts/elemental-lifecycle-manager \
+      --namespace elemental-system \
+      --version 0.1.0
     ```
 
 For more information on chart deployment and customization, refer to the [Helm Chart Reference](docs/helm-chart-ref.md) guide.

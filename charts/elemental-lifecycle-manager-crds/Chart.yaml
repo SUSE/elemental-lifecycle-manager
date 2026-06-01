@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-#!BuildTag: beta/uc/elemental-lifecycle-manager-crds:latest
-#!BuildTag: beta/uc/elemental-lifecycle-manager-crds:0.1.0
+#!BuildTag: elemental/charts/elemental-lifecycle-manager-crds:0.1.0
 
 apiVersion: v2
 name: elemental-lifecycle-manager-crds
