@@ -9,7 +9,7 @@ require (
 	github.com/onsi/gomega v1.41.0
 	github.com/rancher/system-upgrade-controller/pkg/apis v0.0.0-20260409225933-38f3e11fd1dd
 	github.com/rancher/wrangler/v3 v3.4.0
-	github.com/suse/elemental/v3 v3.1.0-alpha.20260528
+	github.com/suse/elemental/v3 v3.0.0
 	helm.sh/helm/v4 v4.1.4
 	k8s.io/api v0.35.4
 	k8s.io/apimachinery v0.35.4
