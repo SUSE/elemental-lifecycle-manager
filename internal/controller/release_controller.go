@@ -232,7 +232,11 @@ func (r *ReleaseReconciler) parseUpgradeConfig(ctx context.Context, manifest *re
 		return nil, fmt.Errorf("parsing drain options: %w", err)
 	}
 
-	return upgrade.NewConfig(manifest, release.Spec.Version, types.NamespacedName{Name: release.Name, Namespace: release.Namespace}, opts)
+	runtimeConfig := &upgrade.RuntimeConfig{
+		DrainOpts: opts,
+	}
+
+	return upgrade.NewConfig(manifest, release.Spec.Version, types.NamespacedName{Name: release.Name, Namespace: release.Namespace}, runtimeConfig)
 }
 
 // cleanupOldVersionPlans deletes SUC Plans from a previous version.

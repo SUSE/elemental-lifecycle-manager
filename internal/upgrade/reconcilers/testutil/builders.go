@@ -74,12 +74,9 @@ func WithKubernetes(image, version string) ConfigOpts {
 	}
 }
 
-func WithHelmCharts(charts []*api.HelmChart) ConfigOpts {
+func WithHelmChartConfig(chartConfigs []*upgrade.HelmChartConfig) ConfigOpts {
 	return func(c *upgrade.Config) {
-		c.HelmCharts = &upgrade.HelmChartConfig{
-			Charts:       charts,
-			Repositories: []*api.HelmRepository{},
-		}
+		c.HelmCharts = chartConfigs
 	}
 }
 

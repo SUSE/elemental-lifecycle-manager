@@ -86,11 +86,7 @@ var _ = Describe("HelmReconciler", func() {
 		Context("when charts list is empty", func() {
 			It("should skip the phase", func() {
 				config = testutil.NewTestConfig()
-				config.HelmCharts = &upgrade.HelmChartConfig{
-					Charts:       []*api.HelmChart{},
-					Repositories: []*api.HelmRepository{},
-				}
-
+				config.HelmCharts = []*upgrade.HelmChartConfig{}
 				status, err := reconciler.Reconcile(ctx, config)
 
 				Expect(err).NotTo(HaveOccurred())
@@ -103,7 +99,7 @@ var _ = Describe("HelmReconciler", func() {
 
 			BeforeEach(func() {
 				chart1 = testutil.NewTestHelmChart(testChart1Name, "1.0.0")
-				config = testutil.NewTestConfig(testutil.WithHelmCharts([]*api.HelmChart{chart1}))
+				config = testutil.NewTestConfig(testutil.WithHelmChartConfig([]*upgrade.HelmChartConfig{{Chart: chart1}}))
 			})
 
 			It("should reconcile charts successfully", func() {
@@ -167,7 +163,7 @@ var _ = Describe("HelmReconciler", func() {
 			Context("with chart needing upgrade", func() {
 				It("should create HelmChart CR", func() {
 					chart := testutil.NewTestHelmChart(testChart1Name, "2.0.0")
-					config = testutil.NewTestConfig(testutil.WithHelmCharts([]*api.HelmChart{chart}))
+					config = testutil.NewTestConfig(testutil.WithHelmChartConfig([]*upgrade.HelmChartConfig{{Chart: chart}}))
 
 					mockHelm.RetrieveReleaseFn = func(name string) (*helm.ReleaseInfo, error) {
 						return &helm.ReleaseInfo{
@@ -195,7 +191,7 @@ var _ = Describe("HelmReconciler", func() {
 
 				It("should update existing HelmChart CR", func() {
 					chart := testutil.NewTestHelmChart(testChart1Name, "2.0.0")
-					config = testutil.NewTestConfig(testutil.WithHelmCharts([]*api.HelmChart{chart}))
+					config = testutil.NewTestConfig(testutil.WithHelmChartConfig([]*upgrade.HelmChartConfig{{Chart: chart}}))
 
 					// Create existing HelmChart with old version
 					existing := testutil.NewTestHelmChartCR(testChart1Name, reconcilers.HelmChartNamespace, "1.0.0")
@@ -233,7 +229,7 @@ var _ = Describe("HelmReconciler", func() {
 
 			BeforeEach(func() {
 				chart = testutil.NewTestHelmChart(testChart1Name, "1.0.0")
-				config = testutil.NewTestConfig(testutil.WithHelmCharts([]*api.HelmChart{chart}))
+				config = testutil.NewTestConfig(testutil.WithHelmChartConfig([]*upgrade.HelmChartConfig{{Chart: chart}}))
 
 				helmChart = testutil.NewTestHelmChartCR(testChart1Name, reconcilers.HelmChartNamespace, "1.0.0")
 				Expect(fakeClient.Create(ctx, helmChart)).To(Succeed())
@@ -323,7 +319,7 @@ var _ = Describe("HelmReconciler", func() {
 		It("should detect circular dependencies", func() {
 			chart1 := testutil.NewTestHelmChart(testChart1Name, "1.0.0", testutil.WithDependencies([]api.HelmChartDependency{{Name: "chart2", Type: api.DependencyTypeHelm}}))
 			chart2 := testutil.NewTestHelmChart("chart2", "1.0.0", testutil.WithDependencies([]api.HelmChartDependency{{Name: testChart1Name, Type: api.DependencyTypeHelm}}))
-			config = testutil.NewTestConfig(testutil.WithHelmCharts([]*api.HelmChart{chart1, chart2}))
+			config = testutil.NewTestConfig(testutil.WithHelmChartConfig([]*upgrade.HelmChartConfig{{Chart: chart1}, {Chart: chart2}}))
 
 			// Mock both charts as installed
 			mockHelm.RetrieveReleaseFn = func(name string) (*helm.ReleaseInfo, error) {
@@ -347,7 +343,7 @@ var _ = Describe("HelmReconciler", func() {
 		It("should not error when sysext dependency has same name as helm chart", func() {
 			chart1 := testutil.NewTestHelmChart(testChart1Name, "1.0.0", testutil.WithDependencies([]api.HelmChartDependency{{Name: testChart1Name, Type: api.DependencyTypeExtension}}))
 			chart2 := testutil.NewTestHelmChart("chart2", "1.0.0", testutil.WithDependencies([]api.HelmChartDependency{{Name: testChart1Name, Type: api.DependencyTypeHelm}}))
-			config = testutil.NewTestConfig(testutil.WithHelmCharts([]*api.HelmChart{chart1, chart2}))
+			config = testutil.NewTestConfig(testutil.WithHelmChartConfig([]*upgrade.HelmChartConfig{{Chart: chart1}, {Chart: chart2}}))
 
 			// Mock both charts as installed
 			mockHelm.RetrieveReleaseFn = func(name string) (*helm.ReleaseInfo, error) {
@@ -370,7 +366,7 @@ var _ = Describe("HelmReconciler", func() {
 		It("should process dependencies before dependents", func() {
 			dep := testutil.NewTestHelmChart("dependency", "1.0.0")
 			parent := testutil.NewTestHelmChart("parent", "2.0.0", testutil.WithDependencies([]api.HelmChartDependency{{Name: "dependency", Type: api.DependencyTypeHelm}}))
-			config = testutil.NewTestConfig(testutil.WithHelmCharts([]*api.HelmChart{parent, dep}))
+			config = testutil.NewTestConfig(testutil.WithHelmChartConfig([]*upgrade.HelmChartConfig{{Chart: parent}, {Chart: dep}}))
 
 			processedCharts := []string{}
 			mockHelm.RetrieveReleaseFn = func(name string) (*helm.ReleaseInfo, error) {

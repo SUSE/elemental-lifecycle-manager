@@ -37,7 +37,7 @@ type Config struct {
 	// Kubernetes contains all upgrade configurations related to the target Kubernetes distribution.
 	Kubernetes *KubernetesConfig
 	// HelmCharts contains all target Helm charts that need to be upgraded.
-	HelmCharts *HelmChartConfig
+	HelmCharts []*HelmChartConfig
 }
 
 // OSConfig contains configurations related to a specific operating system upgrade.
@@ -60,24 +60,28 @@ type KubernetesConfig struct {
 	DrainOpts *DrainOpts
 }
 
-// DrainOpts contains options for draining specific node types
+// DrainOpts contains options for draining specific node types.
 type DrainOpts struct {
-	// ControlPlane specifies that control plane nodes need to be drained
+	// ControlPlane specifies that control plane nodes need to be drained.
 	ControlPlane bool
-	// Worker specifies that worker nodes need to be drained
+	// Worker specifies that worker nodes need to be drained.
 	Worker bool
 }
 
-// HelmChartConfig contains configuration for Helm Controller HelmChart resources.
+// HelmChartConfig contains the configuration for a Helm Controller HelmChart resource.
 type HelmChartConfig struct {
-	// Charts is the list of Helm charts to deploy/upgrade.
-	Charts []*api.HelmChart
-	// Repositories is the list of Helm repositories.
-	Repositories []*api.HelmRepository
+	// Chart specifies the actual chart as defined in the target release.
+	Chart *api.HelmChart
+	// Repository specifies the chart repository as defined in the target release.
+	Repository *api.HelmRepository
 }
 
-// NewConfig constructs a release upgrade specification from the given data.
-func NewConfig(manifest *resolver.ResolvedManifest, releaseVersion string, releaseNamespacedName types.NamespacedName, drainOpts *DrainOpts) (*Config, error) {
+// RuntimeConfig contains runtime configurations defined in addition to the target release.
+type RuntimeConfig struct {
+	DrainOpts *DrainOpts
+}
+
+func NewConfig(manifest *resolver.ResolvedManifest, releaseVersion string, releaseNN types.NamespacedName, runtimeConfig *RuntimeConfig) (*Config, error) {
 	if manifest == nil {
 		return nil, fmt.Errorf("manifest is nil")
 	}
@@ -93,19 +97,19 @@ func NewConfig(manifest *resolver.ResolvedManifest, releaseVersion string, relea
 	}
 
 	config := &Config{
-		ReleaseNamespacedName: releaseNamespacedName,
+		ReleaseNamespacedName: releaseNN,
 		ReleaseVersion:        releaseVersion,
 		OS: &OSConfig{
 			Image:     core.Components.OperatingSystem.Image.Base,
 			Version:   ref.TagStr(),
-			DrainOpts: drainOpts,
+			DrainOpts: runtimeConfig.DrainOpts,
 		},
 	}
 
 	config.Kubernetes = &KubernetesConfig{
 		Image:     core.Components.Kubernetes.Image,
 		Version:   core.Components.Kubernetes.Version,
-		DrainOpts: drainOpts,
+		DrainOpts: runtimeConfig.DrainOpts,
 	}
 
 	if manifest.SolutionExtension == nil {
@@ -118,28 +122,48 @@ func NewConfig(manifest *resolver.ResolvedManifest, releaseVersion string, relea
 	return config, nil
 }
 
-// helmChartConfig merges Helm configurations from core and solution manifests.
-func helmChartConfig(core, solution *api.Helm) *HelmChartConfig {
-	config := &HelmChartConfig{
-		Charts:       make([]*api.HelmChart, 0),
-		Repositories: make([]*api.HelmRepository, 0),
-	}
+// helmChartConfig merges the Helm chart configurations from both core and solution manifests.
+func helmChartConfig(core, solution *api.Helm) []*HelmChartConfig {
+	chartConfig := []*HelmChartConfig{}
 
 	// Add core charts and repositories
 	if core != nil {
-		config.Charts = append(config.Charts, core.Charts...)
-		config.Repositories = append(config.Repositories, core.Repositories...)
+		coreRepos := make(map[string]*api.HelmRepository, len(core.Repositories))
+		for _, repo := range core.Repositories {
+			coreRepos[repo.Name] = repo
+		}
+
+		for _, chart := range core.Charts {
+			config := &HelmChartConfig{Chart: chart}
+			if repo, ok := coreRepos[chart.Repository]; ok {
+				config.Repository = repo
+			}
+
+			chartConfig = append(chartConfig, config)
+		}
 	}
 
 	// Add solution charts and repositories
 	if solution != nil {
-		config.Charts = append(config.Charts, solution.Charts...)
-		config.Repositories = append(config.Repositories, solution.Repositories...)
+		solutionRepos := make(map[string]*api.HelmRepository, len(solution.Repositories))
+		for _, repo := range solution.Repositories {
+			solutionRepos[repo.Name] = repo
+		}
+
+		for _, chart := range solution.Charts {
+			config := &HelmChartConfig{Chart: chart}
+			if repo, ok := solutionRepos[chart.Repository]; ok {
+				config.Repository = repo
+			}
+
+			chartConfig = append(chartConfig, config)
+		}
+
 	}
 
-	if len(config.Charts) == 0 && len(config.Repositories) == 0 {
+	if len(chartConfig) == 0 {
 		return nil
 	}
 
-	return config
+	return chartConfig
 }
