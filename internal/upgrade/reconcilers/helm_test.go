@@ -321,8 +321,8 @@ var _ = Describe("HelmReconciler", func() {
 
 	Describe("dependency ordering (tested indirectly)", func() {
 		It("should detect circular dependencies", func() {
-			chart1 := testutil.NewTestHelmChart("chart1", "1.0.0", testutil.WithDependencies([]string{"chart2"}))
-			chart2 := testutil.NewTestHelmChart("chart2", "1.0.0", testutil.WithDependencies([]string{"chart1"}))
+			chart1 := testutil.NewTestHelmChart("chart1", "1.0.0", testutil.WithDependencies([]api.HelmChartDependency{{Name: "chart2", Type: api.DependencyTypeHelm}}))
+			chart2 := testutil.NewTestHelmChart("chart2", "1.0.0", testutil.WithDependencies([]api.HelmChartDependency{{Name: "chart1", Type: api.DependencyTypeHelm}}))
 			config = testutil.NewTestConfig(testutil.WithHelmCharts([]*api.HelmChart{chart1, chart2}))
 
 			// Mock both charts as installed
@@ -341,11 +341,35 @@ var _ = Describe("HelmReconciler", func() {
 			Expect(err.Error()).To(ContainSubstring("circular dependency"))
 			Expect(status).NotTo(BeNil())
 			Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeFailed))
+
+		})
+
+		It("should not error when sysext dependency has same name as helm chart", func() {
+			chart1 := testutil.NewTestHelmChart("chart1", "1.0.0", testutil.WithDependencies([]api.HelmChartDependency{{Name: "chart1", Type: api.DependencyTypeExtension}}))
+			chart2 := testutil.NewTestHelmChart("chart2", "1.0.0", testutil.WithDependencies([]api.HelmChartDependency{{Name: "chart1", Type: api.DependencyTypeHelm}}))
+			config = testutil.NewTestConfig(testutil.WithHelmCharts([]*api.HelmChart{chart1, chart2}))
+
+			// Mock both charts as installed
+			mockHelm.RetrieveReleaseFn = func(name string) (*helm.ReleaseInfo, error) {
+				return &helm.ReleaseInfo{
+					ChartVersion: testChartVersion,
+					Namespace:    testNamespace,
+					Config:       map[string]any{},
+					Revisions:    1,
+				}, nil
+			}
+
+			status, err := reconciler.Reconcile(ctx, config)
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(status).ToNot(BeNil())
+			Expect(status.Message).To(Equal("All 2 Helm charts upgraded successfully (0 skipped)"))
+			Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeSucceeded))
 		})
 
 		It("should process dependencies before dependents", func() {
 			dep := testutil.NewTestHelmChart("dependency", "1.0.0")
-			parent := testutil.NewTestHelmChart("parent", "2.0.0", testutil.WithDependencies([]string{"dependency"}))
+			parent := testutil.NewTestHelmChart("parent", "2.0.0", testutil.WithDependencies([]api.HelmChartDependency{{Name: "dependency", Type: api.DependencyTypeHelm}}))
 			config = testutil.NewTestConfig(testutil.WithHelmCharts([]*api.HelmChart{parent, dep}))
 
 			processedCharts := []string{}
