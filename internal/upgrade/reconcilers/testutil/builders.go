@@ -85,12 +85,13 @@ func WithHelmCharts(charts []*api.HelmChart) ConfigOpts {
 
 type HelmChartOpts func(h *api.HelmChart)
 
-func WithDependencies(dependencies []string) HelmChartOpts {
+func WithDependencies(dependencies []api.HelmChartDependency) HelmChartOpts {
 	return func(h *api.HelmChart) {
 		h.DependsOn = make([]api.HelmChartDependency, len(dependencies))
 		for i, dep := range dependencies {
 			h.DependsOn[i] = api.HelmChartDependency{
-				Name: dep,
+				Name: dep.Name,
+				Type: dep.Type,
 			}
 		}
 	}

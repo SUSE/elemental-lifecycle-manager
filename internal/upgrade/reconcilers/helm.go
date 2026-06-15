@@ -168,8 +168,10 @@ func sortChartsByDependencies(charts []*api.HelmChart) ([]*api.HelmChart, error)
 
 		// Visit dependencies first
 		for _, dep := range chart.DependsOn {
-			if err := visit(dep.Name); err != nil {
-				return err
+			if dep.Type == api.DependencyTypeHelm {
+				if err := visit(dep.Name); err != nil {
+					return err
+				}
 			}
 		}
 
