@@ -472,6 +472,13 @@ func (r *HelmReconciler) resolveHelmChartValues(chart *helmv1.HelmChart, incomin
 		chart.Spec.Values = &apiextensionsv1.JSON{Raw: rawValues}
 	}
 
+	// Clear the value secrets state. Doing this will ensure that only data provided from the Release
+	// resource will be persisted.
+	chart.Spec.ValuesSecrets = nil
+	if incomingSecret := incomingConfig.RuntimeConfig.ValuesFrom.SecretRef; incomingSecret != nil {
+		chart.Spec.ValuesSecrets = []helmv1.SecretSpec{{Name: incomingSecret.Name, Keys: incomingSecret.Keys}}
+	}
+
 	return nil
 }
 

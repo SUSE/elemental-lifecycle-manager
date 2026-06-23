@@ -103,11 +103,30 @@ type ComponentConfig struct {
 }
 
 type ChartConfig struct {
-	// Chart reference to the chart as seen in the target release manifest.
+	// Chart refers to the chart as seen in the target release manifest.
 	Chart string `json:"chart"`
 	// Values allows for inline custom chart values specification.
 	// +optional
 	Values *apiextensionsv1.JSON `json:"values"`
+	// ValuesFrom allows for custom chart values specification coming from a specific source.
+	// +optional
+	ValuesFrom ChartValuesFrom `json:"valuesFrom"`
+}
+
+type ChartValuesFrom struct {
+	// SecretRef allows for custom chart values specification coming from a Kubernetes Secret
+	// located under the "kube-system" namespace.
+	SecretRef *SecretValueSource `json:"secretRef"`
+}
+
+type SecretValueSource struct {
+	// Name is the Secret name as seen in the "kube-system" namespace.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+	// Keys specify the data entries containing the desired values as seen in the Secret.
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:items:MinLength=1
+	Keys []string `json:"keys"`
 }
 
 // ReleaseStatus defines the observed state of Release

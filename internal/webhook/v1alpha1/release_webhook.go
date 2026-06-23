@@ -21,8 +21,10 @@ import (
 	"context"
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/version"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	lifecyclev1alpha1 "github.com/suse/elemental-lifecycle-manager/api/v1alpha1"
+	"github.com/suse/elemental-lifecycle-manager/internal/upgrade/reconcilers"
 )
 
 // nolint:unused
@@ -74,11 +77,17 @@ func (r *ReleaseValidator) ValidateCreate(ctx context.Context, release *lifecycl
 		)
 	}
 
+	if release.Spec.ComponentConfig != nil {
+		if err := validateHelmValuesSecretExists(r.client, ctx, release.Spec.ComponentConfig.Helm); err != nil {
+			return nil, err
+		}
+	}
+
 	return nil, nil
 }
 
 // ValidateUpdate ensures that updates over a Release resource can only be done when no upgrade process is currently running.
-func (r *ReleaseValidator) ValidateUpdate(_ context.Context, oldRelease, newRelease *lifecyclev1alpha1.Release) (admission.Warnings, error) {
+func (r *ReleaseValidator) ValidateUpdate(ctx context.Context, oldRelease, newRelease *lifecyclev1alpha1.Release) (admission.Warnings, error) {
 	newReleaseVersion, err := validateReleaseVersion(newRelease.Spec.Version)
 	if err != nil {
 		return nil, err
@@ -103,6 +112,12 @@ func (r *ReleaseValidator) ValidateUpdate(_ context.Context, oldRelease, newRele
 			return nil, fmt.Errorf("any edits over %q must come with an increment of the version", newRelease.Name)
 		case -1:
 			return nil, fmt.Errorf("new version must be greater than the currently applied one (%q)", oldRelease.Status.Version)
+		}
+	}
+
+	if newRelease.Spec.ComponentConfig != nil {
+		if err := validateHelmValuesSecretExists(r.client, ctx, newRelease.Spec.ComponentConfig.Helm); err != nil {
+			return nil, err
 		}
 	}
 
@@ -148,4 +163,30 @@ func validateReleaseVersion(releaseVersion string) (*version.Version, error) {
 	}
 
 	return v, nil
+}
+
+// validateHelmValuesSecretExists validates that all Secrets defined in the given chart configuration
+// exist inside the "kube-system" namespace.
+func validateHelmValuesSecretExists(c client.Client, ctx context.Context, chartConfig []lifecyclev1alpha1.ChartConfig) error {
+	for _, chart := range chartConfig {
+		if chart.ValuesFrom.SecretRef != nil {
+			secretName := chart.ValuesFrom.SecretRef.Name
+			exists, err := validateSecretExists(c, ctx, types.NamespacedName{Name: secretName, Namespace: reconcilers.HelmChartNamespace})
+			if err != nil {
+				return fmt.Errorf("cannot verify existence of secret %q: %w", secretName, err)
+			}
+
+			if !exists {
+				return fmt.Errorf("chart %q references a %q secret that is missing from the %q namespace", chart.Chart, secretName, reconcilers.HelmChartNamespace)
+			}
+		}
+	}
+
+	return nil
+}
+
+// validateSecretExists validates whether a Secret exists in the given namespace.
+func validateSecretExists(c client.Client, ctx context.Context, nn types.NamespacedName) (bool, error) {
+	err := c.Get(ctx, nn, &corev1.Secret{})
+	return err == nil, client.IgnoreNotFound(err)
 }

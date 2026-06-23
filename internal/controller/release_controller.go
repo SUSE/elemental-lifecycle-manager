@@ -239,8 +239,16 @@ func (r *ReleaseReconciler) parseUpgradeConfig(ctx context.Context, manifest *re
 		if len(componentConfig.Helm) > 0 {
 			runtimeChartConfigs := make(map[string]upgrade.RuntimeHelmChartConfig)
 			for _, runtimeChartConfig := range componentConfig.Helm {
+				var secretRef *upgrade.RuntimeSecretValueSource
+				if runtimeChartConfig.ValuesFrom.SecretRef != nil {
+					secretRef = &upgrade.RuntimeSecretValueSource{
+						Name: runtimeChartConfig.ValuesFrom.SecretRef.Name,
+						Keys: runtimeChartConfig.ValuesFrom.SecretRef.Keys,
+					}
+				}
 				runtimeChartConfigs[runtimeChartConfig.Chart] = upgrade.RuntimeHelmChartConfig{
-					Values: runtimeChartConfig.Values,
+					Values:     runtimeChartConfig.Values,
+					ValuesFrom: upgrade.RuntimeHelmChartValuesFrom{SecretRef: secretRef},
 				}
 			}
 

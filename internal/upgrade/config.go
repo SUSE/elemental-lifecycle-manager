@@ -88,6 +88,20 @@ type RuntimeConfig struct {
 type RuntimeHelmChartConfig struct {
 	// Values specifies custom values provided by the user inline.
 	Values *apiextensionsv1.JSON
+	// ValuesFrom specifies custom values provided from a specific source (e.g. Secret).
+	ValuesFrom RuntimeHelmChartValuesFrom
+}
+
+type RuntimeHelmChartValuesFrom struct {
+	// SecretRef specifies a reference to a Secret where the custom chart values are provided.
+	SecretRef *RuntimeSecretValueSource
+}
+
+type RuntimeSecretValueSource struct {
+	// Name specifies the name of the Secret.
+	Name string
+	// Keys specifies the data entries containing the desired values as seen in the Secret.
+	Keys []string
 }
 
 func NewConfig(manifest *resolver.ResolvedManifest, releaseVersion string, releaseNN types.NamespacedName, runtimeConfig *RuntimeConfig) (*Config, error) {
