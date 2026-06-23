@@ -97,7 +97,7 @@ var _ = Describe("HelmReconciler", func() {
 			})
 		})
 
-		Context("with valid charts", func() {
+		Context("when chart is valid", func() {
 			var chart1 *api.HelmChart
 
 			BeforeEach(func() {
@@ -181,7 +181,7 @@ var _ = Describe("HelmReconciler", func() {
 				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeSucceeded))
 			})
 
-			Context("with chart needing upgrade", func() {
+			Context("when chart needs an upgrade", func() {
 				const (
 					valueSecretName = "values-secret"
 					secretValue1    = "value1"
@@ -299,11 +299,16 @@ var _ = Describe("HelmReconciler", func() {
 					Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
 				})
 
-				It("should create HelmChart CR", func() {
+				It("should create a HelmChart resource and trigger upgrade when such is missing", func() {
+					// Expected chart values when runtime and release values are merged together.
 					expectedMergedValues := &apiextensionsv1.JSON{
 						Raw: []byte(`{"extraArgs":["arg1","arg3"],"foo":{"bar":"baz"},"key":"changed-value","replicas":"3"}`),
 					}
+
+					// Values secret that will be added to the HelmChart resource.
 					customValueSecret := helmv1.SecretSpec{Name: valueSecretName, Keys: []string{secretValue1}}
+
+					// The Helm chart as seen in the release manifest.
 					chart := testutil.NewTestHelmChart(testChart1Name, "2.0.0")
 					chart.Values = map[string]any{
 						"key":      "value2",
@@ -313,6 +318,8 @@ var _ = Describe("HelmReconciler", func() {
 							"arg3",
 						},
 					}
+
+					// The Helm chart runtime configuration, as defined by the user.
 					config = testutil.NewTestConfig(testutil.WithHelmChartConfig([]*upgrade.HelmChartConfig{{
 						Chart: chart,
 						RuntimeConfig: upgrade.RuntimeHelmChartConfig{
@@ -326,7 +333,10 @@ var _ = Describe("HelmReconciler", func() {
 						},
 					}}))
 
+					// Custom values provided to the chart when it was initially deployed.
 					installTimeValues := map[string]any{"installTime": "value"}
+
+					// Define a Helm release output that will be converted to a HelmChart resource.
 					mockHelm.RetrieveReleaseFn = func(name string) (*helm.ReleaseInfo, error) {
 						return &helm.ReleaseInfo{
 							ChartVersion: "1.0.0",
@@ -348,25 +358,40 @@ var _ = Describe("HelmReconciler", func() {
 						Namespace: reconcilers.HelmChartNamespace,
 					}, helmChart)
 					Expect(err).NotTo(HaveOccurred())
+
+					// Ensure that the chart version was correctly updated.
 					Expect(helmChart.Spec.Version).To(Equal("2.0.0"))
+
+					// Ensure install time custom values are not corrupted.
 					expectedInstallValues, err := yaml.Marshal(installTimeValues)
 					Expect(err).ToNot(HaveOccurred())
 					Expect(helmChart.Spec.ValuesContent).To(MatchYAML(expectedInstallValues))
+
+					// Ensure custom values defined in release manifest and at runtime are present.
 					Expect(helmChart.Spec.Values.Raw).To(MatchJSON(expectedMergedValues.Raw))
+
+					// Ensure custom values secret defined at runtime is present.
 					Expect(helmChart.Spec.ValuesSecrets).To(Equal([]helmv1.SecretSpec{customValueSecret}))
 				})
 
-				It("should update existing HelmChart CR", func() {
+				It("should update existing HelmChart resource when it is present", func() {
+					// Expected chart values when runtime and release values are merged together.
 					expectedMergedValues := &apiextensionsv1.JSON{
 						Raw: []byte(`{"extraArgs":["arg2","arg3"],"foo":{"bar":"baz"},"key":"changed-value","replicas":"2"}`),
 					}
+
+					// Values secret that will override the existing chart values secret.
 					customValueSecret := helmv1.SecretSpec{Name: valueSecretName, Keys: []string{secretValue2}}
+
+					// The Helm chart as seen in the release manifest.
 					chart := testutil.NewTestHelmChart(testChart1Name, "2.0.0")
 					chart.Values = map[string]any{
 						"replicas":  "2",
 						"key":       "bar",
 						"extraArgs": []string{"arg2", "arg3"},
 					}
+
+					// The Helm chart runtime configuration, as defined by the user.
 					config = testutil.NewTestConfig(testutil.WithHelmChartConfig([]*upgrade.HelmChartConfig{{
 						Chart: chart,
 						RuntimeConfig: upgrade.RuntimeHelmChartConfig{
@@ -380,20 +405,16 @@ var _ = Describe("HelmReconciler", func() {
 						},
 					}}))
 
-					// Create existing HelmChart with old version and configuration.
-					existing := testutil.NewTestHelmChartCR(testChart1Name, reconcilers.HelmChartNamespace, "1.0.0")
+					// Representation of an already existing chart that needs to be upgraded.
+					existing := testutil.NewTestHelmChartCR(testChart1Name, reconcilers.HelmChartNamespace, testChartVersion)
 					existing.Spec.Values = &apiextensionsv1.JSON{Raw: []byte(`{"old":"config"}`)}
 					existingSecretValues := helmv1.SecretSpec{Name: "foo", Keys: []string{"value3"}}
 					existing.Spec.ValuesSecrets = []helmv1.SecretSpec{existingSecretValues}
 					Expect(fakeClient.Create(ctx, existing)).To(Succeed())
 
+					// The Helm release representation of the existing HelmChart resource.
 					mockHelm.RetrieveReleaseFn = func(name string) (*helm.ReleaseInfo, error) {
-						return &helm.ReleaseInfo{
-							ChartVersion: testChartVersion,
-							Namespace:    testNamespace,
-							Config:       map[string]any{},
-							Revisions:    1,
-						}, nil
+						return &helm.ReleaseInfo{ChartVersion: testChartVersion}, nil
 					}
 
 					status, err := reconciler.Reconcile(ctx, config)
@@ -408,9 +429,17 @@ var _ = Describe("HelmReconciler", func() {
 						Namespace: reconcilers.HelmChartNamespace,
 					}, updated)
 					Expect(err).NotTo(HaveOccurred())
+
+					// Ensure that the chart version was correctly updated.
 					Expect(updated.Spec.Version).To(Equal("2.0.0"))
+
+					// Ensure that values content was not mistakenly populated.
 					Expect(updated.Spec.ValuesContent).To(BeEmpty())
+
+					// Ensure custom values defined in release manifest and at runtime are present.
 					Expect(updated.Spec.Values.Raw).To(MatchJSON(expectedMergedValues.Raw))
+
+					// Ensure custom values secret defined at runtime is present.
 					Expect(updated.Spec.ValuesSecrets).To(Equal([]helmv1.SecretSpec{customValueSecret}))
 				})
 			})
