@@ -147,7 +147,7 @@ var _ = Describe("HelmReconciler", func() {
 				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeFailed))
 			})
 
-			It("should succeed without upgrading", func() {
+			It("should succeed without upgrading for Helm release when HelmChart is missing", func() {
 				mockHelm.RetrieveReleaseFn = func(name string) (*helm.ReleaseInfo, error) {
 					return &helm.ReleaseInfo{
 						ChartVersion: testChartVersion,
@@ -155,6 +155,24 @@ var _ = Describe("HelmReconciler", func() {
 						Config:       map[string]any{},
 						Revisions:    1,
 					}, nil
+				}
+
+				status, err := reconciler.Reconcile(ctx, config)
+
+				Expect(err).NotTo(HaveOccurred())
+				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeSucceeded))
+			})
+
+			It("should succeed without upgrading for HelmChart resource when no changes occur", func() {
+				// Create an existing HelmChart that matches the chart name and version of the default config.
+				existing := testutil.NewTestHelmChartCR(chart1.Name, reconcilers.HelmChartNamespace, chart1.Version)
+				// Define a chart job so that the Job evaluation step of the chart reconciliation succeeds.
+				existing.Status.JobName = testChart1Job
+				Expect(fakeClient.Create(ctx, existing)).To(Succeed())
+
+				// Define Helm release output for the created HelmChart resource.
+				mockHelm.RetrieveReleaseFn = func(name string) (*helm.ReleaseInfo, error) {
+					return &helm.ReleaseInfo{ChartVersion: testChartVersion}, nil
 				}
 
 				status, err := reconciler.Reconcile(ctx, config)
@@ -181,6 +199,104 @@ var _ = Describe("HelmReconciler", func() {
 						},
 					}
 					Expect(fakeClient.Create(ctx, valuesSecret)).To(Succeed())
+				})
+
+				DescribeTable("should schedule upgrade on chart value change",
+					func(existingValues, incomingValues string) {
+						// Define a config with the incoming chart values changes.
+						config = testutil.NewTestConfig(testutil.WithHelmChartConfig([]*upgrade.HelmChartConfig{
+							{
+								Chart: testutil.NewTestHelmChart(testChart1Name, testChartVersion),
+								RuntimeConfig: upgrade.RuntimeHelmChartConfig{
+									Values: &apiextensionsv1.JSON{Raw: []byte(incomingValues)},
+								},
+							},
+						}))
+
+						// Create an existing HelmChart resource with an existing set of values.
+						existing := testutil.NewTestHelmChartCR(testChart1Name, reconcilers.HelmChartNamespace, testChartVersion)
+						existing.Spec.Values = &apiextensionsv1.JSON{Raw: []byte(existingValues)}
+						// Define a chart job so that the Job evaluation step of the chart reconciliation succeeds.
+						existing.Status.JobName = testChart1Job
+						Expect(fakeClient.Create(ctx, existing)).To(Succeed())
+
+						// Define Helm release output for the created HelmChart resource.
+						mockHelm.RetrieveReleaseFn = func(name string) (*helm.ReleaseInfo, error) {
+							return &helm.ReleaseInfo{ChartVersion: testChartVersion}, nil
+						}
+
+						status, err := reconciler.Reconcile(ctx, config)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(status.Message).To(Equal("Helm charts in progress (0/1 completed, 0 skipped)"))
+						Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
+					},
+					Entry("when updating a value", `{"key":"old"}`, `{"key":"updated"}`),
+					Entry("when adding a value", `{"key":"value"}`, `{"key":"value","new":"value"}`),
+					Entry("when removing a value", `{"key":"value","to":"remove"}`, `{"key":"value"}`),
+				)
+
+				DescribeTable("should schedule upgrade on chart value secrets change",
+					func(existingSecrets []helmv1.SecretSpec, incomingSecret *upgrade.RuntimeSecretValueSource) {
+						// Define a config with the incoming chart values secret changes.
+						config = testutil.NewTestConfig(testutil.WithHelmChartConfig([]*upgrade.HelmChartConfig{
+							{
+								Chart: testutil.NewTestHelmChart(testChart1Name, testChartVersion),
+								RuntimeConfig: upgrade.RuntimeHelmChartConfig{
+									ValuesFrom: upgrade.RuntimeHelmChartValuesFrom{SecretRef: incomingSecret},
+								},
+							},
+						}))
+
+						// Create an existing HelmChart resource with an existing set of value secrets.
+						existing := testutil.NewTestHelmChartCR(testChart1Name, reconcilers.HelmChartNamespace, testChartVersion)
+						existing.Spec.ValuesSecrets = existingSecrets
+						// Define a chart job so that the Job evaluation step of the chart reconciliation succeeds.
+						existing.Status.JobName = testChart1Job
+						Expect(fakeClient.Create(ctx, existing)).To(Succeed())
+
+						// Define Helm release output for the created HelmChart resource.
+						mockHelm.RetrieveReleaseFn = func(name string) (*helm.ReleaseInfo, error) {
+							return &helm.ReleaseInfo{ChartVersion: testChartVersion}, nil
+						}
+
+						status, err := reconciler.Reconcile(ctx, config)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(status.Message).To(Equal("Helm charts in progress (0/1 completed, 0 skipped)"))
+						Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
+					},
+					Entry("when updating a value secret",
+						[]helmv1.SecretSpec{{Name: valueSecretName, Keys: []string{secretValue1}}},
+						&upgrade.RuntimeSecretValueSource{Name: valueSecretName, Keys: []string{secretValue2}},
+					),
+					Entry("when adding a value secret",
+						nil,
+						&upgrade.RuntimeSecretValueSource{Name: valueSecretName, Keys: []string{secretValue1}},
+					),
+					Entry("when removing a value secret",
+						[]helmv1.SecretSpec{{Name: valueSecretName, Keys: []string{secretValue1}}},
+						nil,
+					),
+				)
+
+				It("should schedule upgrade on chart version change", func() {
+					// Create a config that specifies the new chart version.
+					chart := testutil.NewTestHelmChart(testChart1Name, "2.0.0")
+					config = testutil.NewTestConfig(testutil.WithHelmChartConfig([]*upgrade.HelmChartConfig{{Chart: chart}}))
+
+					// Create an existing HelmChart resource with an older version.
+					existing := testutil.NewTestHelmChartCR(testChart1Name, reconcilers.HelmChartNamespace, "1.0.0")
+					// Define Helm release output for the created HelmChart resource.
+					existing.Status.JobName = testChart1Job
+					Expect(fakeClient.Create(ctx, existing)).To(Succeed())
+
+					// Define Helm release output for the created HelmChart resource.
+					mockHelm.RetrieveReleaseFn = func(name string) (*helm.ReleaseInfo, error) {
+						return &helm.ReleaseInfo{ChartVersion: testChartVersion}, nil
+					}
+
+					status, err := reconciler.Reconcile(ctx, config)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
 				})
 
 				It("should create HelmChart CR", func() {
