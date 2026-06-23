@@ -19,13 +19,14 @@ package reconcilers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"net/url"
 	"slices"
 	"strings"
 
+	"go.yaml.in/yaml/v3"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -34,13 +35,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/yaml"
 
 	helmv1 "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	lifecyclev1alpha1 "github.com/suse/elemental-lifecycle-manager/api/v1alpha1"
 	"github.com/suse/elemental-lifecycle-manager/internal/helm"
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade"
 	"github.com/suse/elemental/v3/pkg/manifest/api"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 )
 
 const (
@@ -245,14 +246,18 @@ func (r *HelmReconciler) createHelmChartFromRelease(ctx context.Context, chartCo
 		return fmt.Errorf("building HelmChart: %w", err)
 	}
 
-	// Merge values from installed release with manifest values
-	if len(release.Config) > 0 {
-		mergedValues := mergeMaps(release.Config, chartConfig.Chart.Values)
-		valuesYAML, err := yaml.Marshal(mergedValues)
+	// Merge custom helm release values with any values defined during the build of the HelmChart resource.
+	mergedValues, err := helm.MergeHelmValues(release.Config, helmChart.Spec.ValuesContent)
+	if err != nil {
+		return fmt.Errorf("merging HelmChart values: %w", err)
+	}
+
+	if mergedValues != nil {
+		rawValues, err := yaml.Marshal(mergedValues)
 		if err != nil {
-			return fmt.Errorf("marshaling merged values: %w", err)
+			return fmt.Errorf("marshaling HelmChart values: %w", err)
 		}
-		helmChart.Spec.ValuesContent = string(valuesYAML)
+		helmChart.Spec.ValuesContent = string(rawValues)
 	}
 
 	return r.Create(ctx, helmChart)
@@ -284,21 +289,8 @@ func (r *HelmReconciler) updateHelmChart(ctx context.Context, chartConfig *upgra
 		existing.Spec.Repo = repoURL.String()
 	}
 
-	// Merge existing values with new manifest values
-	if len(chart.Values) > 0 {
-		var existingValues map[string]any
-		if existing.Spec.ValuesContent != "" {
-			if err := yaml.Unmarshal([]byte(existing.Spec.ValuesContent), &existingValues); err != nil {
-				return fmt.Errorf("unmarshaling existing values: %w", err)
-			}
-		}
-
-		mergedValues := mergeMaps(existingValues, chart.Values)
-		valuesYAML, err := yaml.Marshal(mergedValues)
-		if err != nil {
-			return fmt.Errorf("marshaling merged values: %w", err)
-		}
-		existing.Spec.ValuesContent = string(valuesYAML)
+	if err := r.resolveHelmChartValues(existing, chartConfig); err != nil {
+		return fmt.Errorf("resolving HelmChart values: %w", err)
 	}
 
 	return r.Update(ctx, existing)
@@ -349,12 +341,8 @@ func (r *HelmReconciler) buildHelmChart(chartConfig *upgrade.HelmChartConfig, ta
 		helmChart.Spec.Repo = repoURL.String()
 	}
 
-	if len(chart.Values) > 0 {
-		valuesYAML, err := yaml.Marshal(chart.Values)
-		if err != nil {
-			return nil, fmt.Errorf("marshaling values: %w", err)
-		}
-		helmChart.Spec.ValuesContent = string(valuesYAML)
+	if err := r.resolveHelmChartValues(helmChart, chartConfig); err != nil {
+		return nil, fmt.Errorf("resolving HelmChart values: %w", err)
 	}
 
 	return helmChart, nil
@@ -466,20 +454,31 @@ func (r *HelmReconciler) aggregateResults(results []chartUpgradeResult, totalCha
 	}
 }
 
-// mergeMaps recursively merges m2 into m1, with m2 values taking precedence.
-func mergeMaps(m1, m2 map[string]any) map[string]any {
-	out := make(map[string]any, len(m1))
-	maps.Copy(out, m1)
-
-	for k, v := range m2 {
-		if inner, ok := v.(map[string]any); ok {
-			if outInner, ok := out[k].(map[string]any); ok {
-				out[k] = mergeMaps(outInner, inner)
-				continue
-			}
-		}
-		out[k] = v
+// resolveHelmChartValues resolves the values of the given HelmChart based on the specified incoming configuration.
+func (r *HelmReconciler) resolveHelmChartValues(chart *helmv1.HelmChart, incomingConfig *upgrade.HelmChartConfig) error {
+	incomingValues, err := r.generateCustomValuesMap(incomingConfig)
+	if err != nil {
+		return fmt.Errorf("generating HelmChart custom values content: %w", err)
 	}
 
-	return out
+	// Clear the value state. Doing this will ensure that only data provided from the Release
+	// resource will be persisted.
+	chart.Spec.Values = nil
+	if incomingValues != nil {
+		rawValues, err := json.Marshal(incomingValues)
+		if err != nil {
+			return fmt.Errorf("marshaling HelmChart custom values content: %w", err)
+		}
+		chart.Spec.Values = &apiextensionsv1.JSON{Raw: rawValues}
+	}
+
+	return nil
+}
+
+// generateCustomValuesMap generates a custom chart values map from the specified chart configuration.
+// Returns nil if there are no custom chart values for the chart config.
+func (r *HelmReconciler) generateCustomValuesMap(config *upgrade.HelmChartConfig) (map[string]any, error) {
+	// Merge custom values defined in the release manifest with values defined at runtime
+	// with runtime values taking precedence.
+	return helm.MergeHelmValues(config.Chart.Values, config.RuntimeConfig.Values)
 }

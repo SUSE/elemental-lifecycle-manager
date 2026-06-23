@@ -30,8 +30,10 @@ import (
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade/reconcilers"
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade/reconcilers/testutil"
 	"github.com/suse/elemental/v3/pkg/manifest/api"
+	"go.yaml.in/yaml/v3"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -162,14 +164,31 @@ var _ = Describe("HelmReconciler", func() {
 
 			Context("with chart needing upgrade", func() {
 				It("should create HelmChart CR", func() {
+					expectedMergedValues := &apiextensionsv1.JSON{
+						Raw: []byte(`{"extraArgs":["arg1","arg3"],"foo":{"bar":"baz"},"key":"changed-value","replicas":"3"}`),
+					}
 					chart := testutil.NewTestHelmChart(testChart1Name, "2.0.0")
-					config = testutil.NewTestConfig(testutil.WithHelmChartConfig([]*upgrade.HelmChartConfig{{Chart: chart}}))
+					chart.Values = map[string]any{
+						"key":      "value2",
+						"replicas": "3",
+						"extraArgs": []string{
+							"arg1",
+							"arg3",
+						},
+					}
+					config = testutil.NewTestConfig(testutil.WithHelmChartConfig([]*upgrade.HelmChartConfig{{
+						Chart: chart,
+						RuntimeConfig: upgrade.RuntimeHelmChartConfig{
+							Values: &apiextensionsv1.JSON{Raw: []byte(`{"key":"changed-value","foo":{"bar":"baz"}}`)},
+						},
+					}}))
 
+					installTimeValues := map[string]any{"installTime": "value"}
 					mockHelm.RetrieveReleaseFn = func(name string) (*helm.ReleaseInfo, error) {
 						return &helm.ReleaseInfo{
 							ChartVersion: "1.0.0",
 							Namespace:    "default",
-							Config:       map[string]any{"key": "value"},
+							Config:       installTimeValues,
 							Revisions:    1,
 						}, nil
 					}
@@ -187,14 +206,32 @@ var _ = Describe("HelmReconciler", func() {
 					}, helmChart)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(helmChart.Spec.Version).To(Equal("2.0.0"))
+					expectedInstallValues, err := yaml.Marshal(installTimeValues)
+					Expect(err).ToNot(HaveOccurred())
+					Expect(helmChart.Spec.ValuesContent).To(MatchYAML(expectedInstallValues))
+					Expect(helmChart.Spec.Values.Raw).To(MatchJSON(expectedMergedValues.Raw))
 				})
 
 				It("should update existing HelmChart CR", func() {
+					expectedMergedValues := &apiextensionsv1.JSON{
+						Raw: []byte(`{"extraArgs":["arg2","arg3"],"foo":{"bar":"baz"},"key":"changed-value","replicas":"2"}`),
+					}
 					chart := testutil.NewTestHelmChart(testChart1Name, "2.0.0")
-					config = testutil.NewTestConfig(testutil.WithHelmChartConfig([]*upgrade.HelmChartConfig{{Chart: chart}}))
+					chart.Values = map[string]any{
+						"replicas":  "2",
+						"key":       "bar",
+						"extraArgs": []string{"arg2", "arg3"},
+					}
+					config = testutil.NewTestConfig(testutil.WithHelmChartConfig([]*upgrade.HelmChartConfig{{
+						Chart: chart,
+						RuntimeConfig: upgrade.RuntimeHelmChartConfig{
+							Values: &apiextensionsv1.JSON{Raw: []byte(`{"key":"changed-value","foo":{"bar":"baz"}}`)},
+						},
+					}}))
 
-					// Create existing HelmChart with old version
+					// Create existing HelmChart with old version and configuration.
 					existing := testutil.NewTestHelmChartCR(testChart1Name, reconcilers.HelmChartNamespace, "1.0.0")
+					existing.Spec.Values = &apiextensionsv1.JSON{Raw: []byte(`{"old":"config"}`)}
 					Expect(fakeClient.Create(ctx, existing)).To(Succeed())
 
 					mockHelm.RetrieveReleaseFn = func(name string) (*helm.ReleaseInfo, error) {
@@ -219,6 +256,8 @@ var _ = Describe("HelmReconciler", func() {
 					}, updated)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(updated.Spec.Version).To(Equal("2.0.0"))
+					Expect(updated.Spec.ValuesContent).To(BeEmpty())
+					Expect(updated.Spec.Values.Raw).To(MatchJSON(expectedMergedValues.Raw))
 				})
 			})
 		})

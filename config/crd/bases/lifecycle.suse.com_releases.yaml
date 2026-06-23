@@ -39,6 +39,31 @@ spec:
           spec:
             description: spec defines the desired state of Release
             properties:
+              componentConfiguration:
+                description: |-
+                  ComponentConfig allows for additional configuration for components
+                  defined in the target release.
+                properties:
+                  helm:
+                    description: Helm specifies configurations related to the helm
+                      release component.
+                    items:
+                      properties:
+                        chart:
+                          description: Chart reference to the chart as seen in the
+                            target release manifest.
+                          type: string
+                        values:
+                          description: Values allows for inline custom chart values
+                            specification.
+                          x-kubernetes-preserve-unknown-fields: true
+                      required:
+                      - chart
+                      type: object
+                    type: array
+                required:
+                - helm
+                type: object
               disableDrain:
                 description: DisableDrain specifies whether nodes drain should be
                   disabled.

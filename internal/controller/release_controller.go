@@ -232,8 +232,20 @@ func (r *ReleaseReconciler) parseUpgradeConfig(ctx context.Context, manifest *re
 		return nil, fmt.Errorf("parsing drain options: %w", err)
 	}
 
-	runtimeConfig := &upgrade.RuntimeConfig{
-		DrainOpts: opts,
+	runtimeConfig := &upgrade.RuntimeConfig{DrainOpts: opts}
+
+	componentConfig := release.Spec.ComponentConfig
+	if componentConfig != nil {
+		if len(componentConfig.Helm) > 0 {
+			runtimeChartConfigs := make(map[string]upgrade.RuntimeHelmChartConfig)
+			for _, runtimeChartConfig := range componentConfig.Helm {
+				runtimeChartConfigs[runtimeChartConfig.Chart] = upgrade.RuntimeHelmChartConfig{
+					Values: runtimeChartConfig.Values,
+				}
+			}
+
+			runtimeConfig.HelmCharts = runtimeChartConfigs
+		}
 	}
 
 	return upgrade.NewConfig(manifest, release.Spec.Version, types.NamespacedName{Name: release.Name, Namespace: release.Namespace}, runtimeConfig)
