@@ -29,6 +29,7 @@ import (
 	"go.yaml.in/yaml/v3"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -227,9 +228,13 @@ func (r *HelmReconciler) reconcileChart(ctx context.Context, chartConfig *upgrad
 		return helm.ChartStateUnknown, fmt.Errorf("getting HelmChart: %w", err)
 	}
 
-	// Update existing HelmChart CR if version differs
-	if existing.Spec.Version != chart.Version {
-		logger.Info("Updating HelmChart for upgrade", "chart", chartName,
+	update, err := r.shouldUpdateChart(existing, chartConfig)
+	if err != nil {
+		return helm.ChartStateUnknown, fmt.Errorf("checking whether chart update is necessary: %w", err)
+	}
+
+	if update {
+		logger.Info("Updating HelmChart", "chart", chartName,
 			"currentVersion", existing.Spec.Version,
 			"targetVersion", chart.Version)
 		return helm.ChartStateInProgress, r.updateHelmChart(ctx, chartConfig, existing)
@@ -488,4 +493,40 @@ func (r *HelmReconciler) generateCustomValuesMap(config *upgrade.HelmChartConfig
 	// Merge custom values defined in the release manifest with values defined at runtime
 	// with runtime values taking precedence.
 	return helm.MergeHelmValues(config.Chart.Values, config.RuntimeConfig.Values)
+}
+
+// shouldUpdateChart determines whether the existing chart needs to be updated based on the incoming chart configuration.
+func (r *HelmReconciler) shouldUpdateChart(existing *helmv1.HelmChart, incomingConfig *upgrade.HelmChartConfig) (bool, error) {
+	// Mismatch between existing and incoming chart version.
+	if existing.Spec.Version != incomingConfig.Chart.Version {
+		return true, nil
+	}
+
+	// Construct the custom values for this chart.
+	incomingValues, err := r.generateCustomValuesMap(incomingConfig)
+	if err != nil {
+		return false, fmt.Errorf("generating HelmChart custom values content: %w", err)
+	}
+
+	var existingValues map[string]any
+	if existing.Spec.Values != nil {
+		if err := json.Unmarshal(existing.Spec.Values.Raw, &existingValues); err != nil {
+			return false, fmt.Errorf("unmarshaling existing HelmChart values: %w", err)
+		}
+	}
+
+	// Mismatch between existing and incoming chart custom values.
+	if !equality.Semantic.DeepEqual(existingValues, incomingValues) {
+		return true, nil
+	}
+
+	var desiredSecrets []helmv1.SecretSpec
+	if secret := incomingConfig.RuntimeConfig.ValuesFrom.SecretRef; secret != nil {
+		desiredSecrets = []helmv1.SecretSpec{{Name: secret.Name, Keys: secret.Keys}}
+	}
+
+	// Mismatch between existing and incoming chart custom value secrets.
+	return !slices.EqualFunc(existing.Spec.ValuesSecrets, desiredSecrets, func(a, b helmv1.SecretSpec) bool {
+		return a.Name == b.Name && slices.Equal(a.Keys, b.Keys)
+	}), nil
 }
