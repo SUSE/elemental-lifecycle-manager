@@ -23,6 +23,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/suse/elemental/v3/pkg/manifest/api"
 	"github.com/suse/elemental/v3/pkg/manifest/resolver"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -74,11 +75,19 @@ type HelmChartConfig struct {
 	Chart *api.HelmChart
 	// Repository specifies the chart repository as defined in the target release.
 	Repository *api.HelmRepository
+	// RuntimeConfig specifies chart configuration provided by the user at runtime.
+	RuntimeConfig RuntimeHelmChartConfig
 }
 
-// RuntimeConfig contains runtime configurations defined in addition to the target release.
+// RuntimeConfig specifies any upgrade configuration provided by the user at runtime.
 type RuntimeConfig struct {
-	DrainOpts *DrainOpts
+	DrainOpts  *DrainOpts
+	HelmCharts map[string]RuntimeHelmChartConfig
+}
+
+type RuntimeHelmChartConfig struct {
+	// Values specifies custom values provided by the user inline.
+	Values *apiextensionsv1.JSON
 }
 
 func NewConfig(manifest *resolver.ResolvedManifest, releaseVersion string, releaseNN types.NamespacedName, runtimeConfig *RuntimeConfig) (*Config, error) {
@@ -113,17 +122,17 @@ func NewConfig(manifest *resolver.ResolvedManifest, releaseVersion string, relea
 	}
 
 	if manifest.SolutionExtension == nil {
-		config.HelmCharts = helmChartConfig(core.Components.Helm, nil)
+		config.HelmCharts = helmChartConfig(core.Components.Helm, nil, runtimeConfig.HelmCharts)
 	} else {
 		solution := manifest.SolutionExtension
-		config.HelmCharts = helmChartConfig(core.Components.Helm, solution.Components.Helm)
+		config.HelmCharts = helmChartConfig(core.Components.Helm, solution.Components.Helm, runtimeConfig.HelmCharts)
 	}
 
 	return config, nil
 }
 
-// helmChartConfig merges the Helm chart configurations from both core and solution manifests.
-func helmChartConfig(core, solution *api.Helm) []*HelmChartConfig {
+// helmChartConfig merges Helm configurations from core and solution manifests.
+func helmChartConfig(core, solution *api.Helm, runtimeConfigs map[string]RuntimeHelmChartConfig) []*HelmChartConfig {
 	chartConfig := []*HelmChartConfig{}
 
 	// Add core charts and repositories
@@ -137,6 +146,10 @@ func helmChartConfig(core, solution *api.Helm) []*HelmChartConfig {
 			config := &HelmChartConfig{Chart: chart}
 			if repo, ok := coreRepos[chart.Repository]; ok {
 				config.Repository = repo
+			}
+
+			if runtimeConfigs, ok := runtimeConfigs[chart.Chart]; ok {
+				config.RuntimeConfig = runtimeConfigs
 			}
 
 			chartConfig = append(chartConfig, config)
@@ -154,6 +167,10 @@ func helmChartConfig(core, solution *api.Helm) []*HelmChartConfig {
 			config := &HelmChartConfig{Chart: chart}
 			if repo, ok := solutionRepos[chart.Repository]; ok {
 				config.Repository = repo
+			}
+
+			if runtimeConfigs, ok := runtimeConfigs[chart.Chart]; ok {
+				config.RuntimeConfig = runtimeConfigs
 			}
 
 			chartConfig = append(chartConfig, config)

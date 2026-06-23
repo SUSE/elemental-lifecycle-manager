@@ -21,6 +21,7 @@ import (
 	"regexp"
 	"strings"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -90,6 +91,23 @@ type ReleaseSpec struct {
 	// DisableDrain specifies whether nodes drain should be disabled.
 	// +optional
 	DisableDrain bool `json:"disableDrain"`
+	// ComponentConfig allows for additional configuration for components
+	// defined in the target release.
+	// +optional
+	ComponentConfig *ComponentConfig `json:"componentConfiguration"`
+}
+
+type ComponentConfig struct {
+	// Helm specifies configurations related to the helm release component.
+	Helm []ChartConfig `json:"helm"`
+}
+
+type ChartConfig struct {
+	// Chart reference to the chart as seen in the target release manifest.
+	Chart string `json:"chart"`
+	// Values allows for inline custom chart values specification.
+	// +optional
+	Values *apiextensionsv1.JSON `json:"values"`
 }
 
 // ReleaseStatus defines the observed state of Release
