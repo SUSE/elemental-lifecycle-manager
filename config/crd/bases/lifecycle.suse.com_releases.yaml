@@ -50,13 +50,42 @@ spec:
                     items:
                       properties:
                         chart:
-                          description: Chart reference to the chart as seen in the
-                            target release manifest.
+                          description: Chart refers to the chart as seen in the target
+                            release manifest.
                           type: string
                         values:
                           description: Values allows for inline custom chart values
                             specification.
                           x-kubernetes-preserve-unknown-fields: true
+                        valuesFrom:
+                          description: ValuesFrom allows for custom chart values specification
+                            coming from a specific source.
+                          properties:
+                            secretRef:
+                              description: |-
+                                SecretRef allows for custom chart values specification coming from a Kubernetes Secret
+                                located under the "kube-system" namespace.
+                              properties:
+                                keys:
+                                  description: Keys specify the data entries containing
+                                    the desired values as seen in the Secret.
+                                  items:
+                                    minLength: 1
+                                    type: string
+                                  minItems: 1
+                                  type: array
+                                name:
+                                  description: Name is the Secret name as seen in
+                                    the "kube-system" namespace.
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - keys
+                              - name
+                              type: object
+                          required:
+                          - secretRef
+                          type: object
                       required:
                       - chart
                       type: object

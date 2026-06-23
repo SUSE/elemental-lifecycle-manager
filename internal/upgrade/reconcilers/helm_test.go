@@ -34,6 +34,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -163,10 +164,30 @@ var _ = Describe("HelmReconciler", func() {
 			})
 
 			Context("with chart needing upgrade", func() {
+				const (
+					valueSecretName = "values-secret"
+					secretValue1    = "value1"
+					secretValue2    = "value2"
+				)
+				BeforeEach(func() {
+					valuesSecret := &corev1.Secret{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      valueSecretName,
+							Namespace: reconcilers.HelmChartNamespace,
+						},
+						Data: map[string][]byte{
+							secretValue1: []byte("foo: bar"),
+							secretValue2: []byte("bar: baz"),
+						},
+					}
+					Expect(fakeClient.Create(ctx, valuesSecret)).To(Succeed())
+				})
+
 				It("should create HelmChart CR", func() {
 					expectedMergedValues := &apiextensionsv1.JSON{
 						Raw: []byte(`{"extraArgs":["arg1","arg3"],"foo":{"bar":"baz"},"key":"changed-value","replicas":"3"}`),
 					}
+					customValueSecret := helmv1.SecretSpec{Name: valueSecretName, Keys: []string{secretValue1}}
 					chart := testutil.NewTestHelmChart(testChart1Name, "2.0.0")
 					chart.Values = map[string]any{
 						"key":      "value2",
@@ -180,6 +201,12 @@ var _ = Describe("HelmReconciler", func() {
 						Chart: chart,
 						RuntimeConfig: upgrade.RuntimeHelmChartConfig{
 							Values: &apiextensionsv1.JSON{Raw: []byte(`{"key":"changed-value","foo":{"bar":"baz"}}`)},
+							ValuesFrom: upgrade.RuntimeHelmChartValuesFrom{
+								SecretRef: &upgrade.RuntimeSecretValueSource{
+									Name: customValueSecret.Name,
+									Keys: customValueSecret.Keys,
+								},
+							},
 						},
 					}}))
 
@@ -210,12 +237,14 @@ var _ = Describe("HelmReconciler", func() {
 					Expect(err).ToNot(HaveOccurred())
 					Expect(helmChart.Spec.ValuesContent).To(MatchYAML(expectedInstallValues))
 					Expect(helmChart.Spec.Values.Raw).To(MatchJSON(expectedMergedValues.Raw))
+					Expect(helmChart.Spec.ValuesSecrets).To(Equal([]helmv1.SecretSpec{customValueSecret}))
 				})
 
 				It("should update existing HelmChart CR", func() {
 					expectedMergedValues := &apiextensionsv1.JSON{
 						Raw: []byte(`{"extraArgs":["arg2","arg3"],"foo":{"bar":"baz"},"key":"changed-value","replicas":"2"}`),
 					}
+					customValueSecret := helmv1.SecretSpec{Name: valueSecretName, Keys: []string{secretValue2}}
 					chart := testutil.NewTestHelmChart(testChart1Name, "2.0.0")
 					chart.Values = map[string]any{
 						"replicas":  "2",
@@ -226,12 +255,20 @@ var _ = Describe("HelmReconciler", func() {
 						Chart: chart,
 						RuntimeConfig: upgrade.RuntimeHelmChartConfig{
 							Values: &apiextensionsv1.JSON{Raw: []byte(`{"key":"changed-value","foo":{"bar":"baz"}}`)},
+							ValuesFrom: upgrade.RuntimeHelmChartValuesFrom{
+								SecretRef: &upgrade.RuntimeSecretValueSource{
+									Name: customValueSecret.Name,
+									Keys: customValueSecret.Keys,
+								},
+							},
 						},
 					}}))
 
 					// Create existing HelmChart with old version and configuration.
 					existing := testutil.NewTestHelmChartCR(testChart1Name, reconcilers.HelmChartNamespace, "1.0.0")
 					existing.Spec.Values = &apiextensionsv1.JSON{Raw: []byte(`{"old":"config"}`)}
+					existingSecretValues := helmv1.SecretSpec{Name: "foo", Keys: []string{"value3"}}
+					existing.Spec.ValuesSecrets = []helmv1.SecretSpec{existingSecretValues}
 					Expect(fakeClient.Create(ctx, existing)).To(Succeed())
 
 					mockHelm.RetrieveReleaseFn = func(name string) (*helm.ReleaseInfo, error) {
@@ -258,6 +295,7 @@ var _ = Describe("HelmReconciler", func() {
 					Expect(updated.Spec.Version).To(Equal("2.0.0"))
 					Expect(updated.Spec.ValuesContent).To(BeEmpty())
 					Expect(updated.Spec.Values.Raw).To(MatchJSON(expectedMergedValues.Raw))
+					Expect(updated.Spec.ValuesSecrets).To(Equal([]helmv1.SecretSpec{customValueSecret}))
 				})
 			})
 		})
