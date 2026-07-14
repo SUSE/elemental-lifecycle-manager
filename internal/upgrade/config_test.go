@@ -18,6 +18,8 @@ limitations under the License.
 package upgrade
 
 import (
+	"strings"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/suse/elemental/v3/pkg/manifest/api"
@@ -98,6 +100,48 @@ var _ = Describe("Configuration creation", func() {
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("parsing OS image \"registry.com/foo:bar@broken@broken\": tag can only contain the characters"))
 	})
+
+	It("Should fail for unknown charts", func() {
+		manifest := &resolver.ResolvedManifest{
+			CorePlatform: &core.ReleaseManifest{
+				Components: core.Components{
+					OperatingSystem: &core.OperatingSystem{
+						Image: core.Image{
+							Base: baseOSImage,
+						},
+					},
+					Kubernetes: &core.Kubernetes{
+						Image:   k8sImage,
+						Version: k8sVersion,
+					},
+					Helm: &api.Helm{
+						Charts: []*api.HelmChart{
+							{Chart: "chart1"},
+							{Chart: "chart2"},
+						},
+					},
+				},
+			},
+		}
+
+		runtimeConfig := &RuntimeConfig{
+			HelmCharts: map[string]RuntimeHelmChartConfig{
+				"chart1":   {},
+				"unknown1": {},
+				"unknown2": {},
+				"chatr2":   {}},
+		}
+
+		_, err := NewConfig(manifest, "", types.NamespacedName{}, runtimeConfig)
+		Expect(err).To(HaveOccurred())
+
+		errSubstr := "Unknown chart references: "
+		Expect(err.Error()).To(ContainSubstring(errSubstr))
+		_, after, _ := strings.Cut(err.Error(), errSubstr)
+		unknownCharts := strings.Split(after, ", ")
+		Expect(unknownCharts).To(ConsistOf("unknown1", "unknown2", "chatr2"))
+	})
+
 	It("Should construct a correct upgrade configuration", func() {
 		resolvedManifest := &resolver.ResolvedManifest{CorePlatform: corePlatformManifest, SolutionExtension: solutionExtension}
 		runtimeSecretValues := &RuntimeSecretValueSource{

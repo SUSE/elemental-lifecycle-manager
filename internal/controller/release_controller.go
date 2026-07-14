@@ -126,6 +126,17 @@ func (r *ReleaseReconciler) reconcileNormal(ctx context.Context, release *lifecy
 
 	config, err := r.parseUpgradeConfig(ctx, manifest, release)
 	if err != nil {
+		var runtimeConfigErr upgrade.RuntimeConfigError
+		if errors.As(err, &runtimeConfigErr) {
+			// Use info-level logging rather than returning the error. Since the error is related to
+			// user misconfiguration, this ensures that the controller does not needlessly requeue
+			// until the user fixes the underlying configuration issue.
+			logger.Info("Invalid component configuration in Release resource", "error", runtimeConfigErr.Error())
+
+			setCondition(release, lifecyclev1alpha1.ConditionApplied, metav1.ConditionFalse,
+				lifecyclev1alpha1.UpgradeFailed, runtimeConfigErr.Error())
+			return ctrl.Result{}, nil
+		}
 		return ctrl.Result{}, fmt.Errorf("parsing upgrade config: %w", err)
 	}
 
