@@ -32,12 +32,13 @@ import (
 )
 
 const (
-	testNamespace      = "default"
-	testRegistry       = "registry.example.com"
-	testReleaseName    = "release"
-	testReleaseVersion = "0.5.0"
-	testChartName      = "test-chart"
-	existingSecretName = "existing-secret"
+	testNamespace        = "default"
+	testRegistry         = "registry.example.com"
+	testReleaseName      = "release"
+	testReleaseVersion   = "0.5.0"
+	updateReleaseVersion = "1.0.1"
+	testChartName        = "test-chart"
+	existingSecretName   = "existing-secret"
 )
 
 var _ = Describe("Release Webhook", Ordered, func() {
@@ -129,6 +130,36 @@ var _ = Describe("Release Webhook", Ordered, func() {
 			err := k8sClient.Create(ctx, release)
 			Expect(err).To(HaveOccurred())
 			Expect(err).To(MatchError(ContainSubstring("chart \"test-chart\" references a \"missing-secret\" secret that is missing from the \"kube-system\" namespace")))
+		})
+
+		It("Should be denied if ComponentConfig references a missing secret key", func() {
+			release := &lifecyclev1alpha1.Release{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testReleaseName,
+					Namespace: testNamespace,
+				},
+				Spec: lifecyclev1alpha1.ReleaseSpec{
+					Registry: testRegistry,
+					Version:  testReleaseVersion,
+					ComponentConfig: &lifecyclev1alpha1.ComponentConfig{
+						Helm: []lifecyclev1alpha1.ChartConfig{
+							{
+								Chart: testChartName,
+								ValuesFrom: lifecyclev1alpha1.ChartValuesFrom{
+									SecretRef: &lifecyclev1alpha1.SecretValueSource{
+										Name: existingSecretName,
+										Keys: []string{"valeus.yaml"},
+									},
+								},
+							},
+						},
+					},
+				},
+			}
+
+			err := k8sClient.Create(ctx, release)
+			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("chart \"test-chart\" references a \"valeus.yaml\" key that is missing from the \"existing-secret\" secret")))
 		})
 
 		It("Should admit if all fields are defined correctly", func() {
@@ -257,7 +288,7 @@ var _ = Describe("Release Webhook", Ordered, func() {
 		})
 
 		It("Should be denied if ComponentConfig references a missing secret", func() {
-			release.Spec.Version = "1.0.1"
+			release.Spec.Version = updateReleaseVersion
 			release.Spec.ComponentConfig = &lifecyclev1alpha1.ComponentConfig{
 				Helm: []lifecyclev1alpha1.ChartConfig{
 					{
@@ -277,8 +308,29 @@ var _ = Describe("Release Webhook", Ordered, func() {
 			Expect(err).To(MatchError(ContainSubstring("chart \"test-chart\" references a \"missing-secret\" secret that is missing from the \"kube-system\" namespace")))
 		})
 
+		It("Should be denied if ComponentConfig references a missing secret key", func() {
+			release.Spec.Version = updateReleaseVersion
+			release.Spec.ComponentConfig = &lifecyclev1alpha1.ComponentConfig{
+				Helm: []lifecyclev1alpha1.ChartConfig{
+					{
+						Chart: testChartName,
+						ValuesFrom: lifecyclev1alpha1.ChartValuesFrom{
+							SecretRef: &lifecyclev1alpha1.SecretValueSource{
+								Name: existingSecretName,
+								Keys: []string{"valeus.yaml"},
+							},
+						},
+					},
+				},
+			}
+
+			err := k8sClient.Update(ctx, release)
+			Expect(err).To(HaveOccurred())
+			Expect(err).To(MatchError(ContainSubstring("chart \"test-chart\" references a \"valeus.yaml\" key that is missing from the \"existing-secret\" secret")))
+		})
+
 		It("Should pass if the new release version is higher than the last applied one", func() {
-			release.Spec.Version = "1.0.1"
+			release.Spec.Version = updateReleaseVersion
 			Expect(k8sClient.Update(ctx, release)).To(Succeed())
 		})
 
