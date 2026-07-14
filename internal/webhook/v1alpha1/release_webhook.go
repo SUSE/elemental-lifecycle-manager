@@ -33,6 +33,7 @@ import (
 
 	lifecyclev1alpha1 "github.com/suse/elemental-lifecycle-manager/api/v1alpha1"
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade/reconcilers"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 // nolint:unused
@@ -78,7 +79,7 @@ func (r *ReleaseValidator) ValidateCreate(ctx context.Context, release *lifecycl
 	}
 
 	if release.Spec.ComponentConfig != nil {
-		if err := validateHelmValuesSecretExists(r.client, ctx, release.Spec.ComponentConfig.Helm); err != nil {
+		if err := validateHelmValuesSecret(r.client, ctx, release.Spec.ComponentConfig.Helm); err != nil {
 			return nil, err
 		}
 	}
@@ -116,7 +117,7 @@ func (r *ReleaseValidator) ValidateUpdate(ctx context.Context, oldRelease, newRe
 	}
 
 	if newRelease.Spec.ComponentConfig != nil {
-		if err := validateHelmValuesSecretExists(r.client, ctx, newRelease.Spec.ComponentConfig.Helm); err != nil {
+		if err := validateHelmValuesSecret(r.client, ctx, newRelease.Spec.ComponentConfig.Helm); err != nil {
 			return nil, err
 		}
 	}
@@ -165,28 +166,31 @@ func validateReleaseVersion(releaseVersion string) (*version.Version, error) {
 	return v, nil
 }
 
-// validateHelmValuesSecretExists validates that all Secrets defined in the given chart configuration
-// exist inside the "kube-system" namespace.
-func validateHelmValuesSecretExists(c client.Client, ctx context.Context, chartConfig []lifecyclev1alpha1.ChartConfig) error {
+// validateHelmValuesSecret ensures that all user provided chart value secrets
+// are present on the cluster and are containing the desired secret keys.
+func validateHelmValuesSecret(c client.Client, ctx context.Context, chartConfig []lifecyclev1alpha1.ChartConfig) error {
 	for _, chart := range chartConfig {
 		if chart.ValuesFrom.SecretRef != nil {
 			secretName := chart.ValuesFrom.SecretRef.Name
-			exists, err := validateSecretExists(c, ctx, types.NamespacedName{Name: secretName, Namespace: reconcilers.HelmChartNamespace})
-			if err != nil {
-				return fmt.Errorf("cannot verify existence of secret %q: %w", secretName, err)
+			secretNN := types.NamespacedName{
+				Name:      secretName,
+				Namespace: reconcilers.HelmChartNamespace,
 			}
 
-			if !exists {
-				return fmt.Errorf("chart %q references a %q secret that is missing from the %q namespace", chart.Chart, secretName, reconcilers.HelmChartNamespace)
+			existing := &corev1.Secret{}
+			if err := c.Get(ctx, secretNN, existing); err != nil {
+				if apierrors.IsNotFound(err) {
+					return fmt.Errorf("chart %q references a %q secret that is missing from the %q namespace", chart.Chart, secretName, reconcilers.HelmChartNamespace)
+				}
+				return fmt.Errorf("retrieving secret %q: %w", secretName, err)
+			}
+
+			for _, key := range chart.ValuesFrom.SecretRef.Keys {
+				if _, ok := existing.Data[key]; !ok {
+					return fmt.Errorf("chart %q references a %q key that is missing from the %q secret", chart.Chart, key, secretName)
+				}
 			}
 		}
 	}
-
 	return nil
-}
-
-// validateSecretExists validates whether a Secret exists in the given namespace.
-func validateSecretExists(c client.Client, ctx context.Context, nn types.NamespacedName) (bool, error) {
-	err := c.Get(ctx, nn, &corev1.Secret{})
-	return err == nil, client.IgnoreNotFound(err)
 }
