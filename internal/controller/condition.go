@@ -37,21 +37,24 @@ func setCondition(release *lifecyclev1alpha1.Release, conditionType string, stat
 	})
 }
 
-// initializePendingConditions sets pending conditions for both the manifest and upgrade phases.
+// initializePendingConditions marks all upgrade relevant conditions as pending.
 func initializePendingConditions(release *lifecyclev1alpha1.Release, phases []upgrade.Phase) {
-	existing := apimeta.FindStatusCondition(release.Status.Conditions, lifecyclev1alpha1.ConditionManifestResolved)
-	if existing == nil {
+	if apimeta.FindStatusCondition(release.Status.Conditions, lifecyclev1alpha1.ConditionManifestResolved) == nil {
 		setCondition(release, lifecyclev1alpha1.ConditionManifestResolved, metav1.ConditionFalse,
 			lifecyclev1alpha1.UpgradePending, "Waiting for release manifest to be resolved")
 	}
 
 	for _, phase := range phases {
 		conditionType := phase.ConditionType()
-		existing := apimeta.FindStatusCondition(release.Status.Conditions, conditionType)
-		if existing == nil {
+		if apimeta.FindStatusCondition(release.Status.Conditions, conditionType) == nil {
 			setCondition(release, conditionType, metav1.ConditionFalse,
 				lifecyclev1alpha1.UpgradePending, "Waiting for previous phases to complete")
 		}
+	}
+
+	if apimeta.FindStatusCondition(release.Status.Conditions, lifecyclev1alpha1.ConditionApplied) == nil {
+		setCondition(release, lifecyclev1alpha1.ConditionApplied, metav1.ConditionFalse,
+			lifecyclev1alpha1.UpgradePending, "Upgrade pending")
 	}
 }
 
@@ -129,8 +132,5 @@ func updateAppliedCondition(release *lifecyclev1alpha1.Release, phases []upgrade
 	case inProgressPhase != "":
 		setCondition(release, lifecyclev1alpha1.ConditionApplied, metav1.ConditionFalse,
 			lifecyclev1alpha1.UpgradeInProgress, fmt.Sprintf("Phase %s is in progress", inProgressPhase))
-	default:
-		setCondition(release, lifecyclev1alpha1.ConditionApplied, metav1.ConditionFalse,
-			lifecyclev1alpha1.UpgradePending, "Upgrade pending")
 	}
 }
