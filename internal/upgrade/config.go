@@ -19,6 +19,9 @@ package upgrade
 
 import (
 	"fmt"
+	"maps"
+	"slices"
+	"strings"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/suse/elemental/v3/pkg/manifest/api"
@@ -85,6 +88,11 @@ type RuntimeConfig struct {
 	HelmCharts map[string]RuntimeHelmChartConfig
 }
 
+// RuntimeConfigError specifies an error caused due to invalid runtime configuration.
+type RuntimeConfigError string
+
+func (c RuntimeConfigError) Error() string { return string(c) }
+
 type RuntimeHelmChartConfig struct {
 	// Values specifies custom values provided by the user inline.
 	Values *apiextensionsv1.JSON
@@ -135,19 +143,27 @@ func NewConfig(manifest *resolver.ResolvedManifest, releaseVersion string, relea
 		DrainOpts: runtimeConfig.DrainOpts,
 	}
 
-	if manifest.SolutionExtension == nil {
-		config.HelmCharts = helmChartConfig(core.Components.Helm, nil, runtimeConfig.HelmCharts)
-	} else {
-		solution := manifest.SolutionExtension
-		config.HelmCharts = helmChartConfig(core.Components.Helm, solution.Components.Helm, runtimeConfig.HelmCharts)
+	var solutionCharts *api.Helm
+	if manifest.SolutionExtension != nil {
+		solutionCharts = manifest.SolutionExtension.Components.Helm
 	}
 
+	charts, err := helmChartConfig(core.Components.Helm, solutionCharts, runtimeConfig.HelmCharts)
+	if err != nil {
+		return nil, fmt.Errorf("parsing helm chart configuration: %w", err)
+	}
+
+	config.HelmCharts = charts
 	return config, nil
 }
 
-// helmChartConfig merges Helm configurations from core and solution manifests.
-func helmChartConfig(core, solution *api.Helm, runtimeConfigs map[string]RuntimeHelmChartConfig) []*HelmChartConfig {
+// helmChartConfig merges Helm configurations from the core and solution manifests with any runtime-defined overrides.
+func helmChartConfig(core, solution *api.Helm, runtimeConfigs map[string]RuntimeHelmChartConfig) ([]*HelmChartConfig, error) {
 	chartConfig := []*HelmChartConfig{}
+	unprocessedRuntimeCharts := make(map[string]struct{}, len(runtimeConfigs))
+	for chart := range runtimeConfigs {
+		unprocessedRuntimeCharts[chart] = struct{}{}
+	}
 
 	// Add core charts and repositories
 	if core != nil {
@@ -162,8 +178,9 @@ func helmChartConfig(core, solution *api.Helm, runtimeConfigs map[string]Runtime
 				config.Repository = repo
 			}
 
-			if runtimeConfigs, ok := runtimeConfigs[chart.Chart]; ok {
-				config.RuntimeConfig = runtimeConfigs
+			if rc, ok := runtimeConfigs[chart.Chart]; ok {
+				config.RuntimeConfig = rc
+				delete(unprocessedRuntimeCharts, chart.Chart)
 			}
 
 			chartConfig = append(chartConfig, config)
@@ -183,8 +200,9 @@ func helmChartConfig(core, solution *api.Helm, runtimeConfigs map[string]Runtime
 				config.Repository = repo
 			}
 
-			if runtimeConfigs, ok := runtimeConfigs[chart.Chart]; ok {
-				config.RuntimeConfig = runtimeConfigs
+			if rc, ok := runtimeConfigs[chart.Chart]; ok {
+				config.RuntimeConfig = rc
+				delete(unprocessedRuntimeCharts, chart.Chart)
 			}
 
 			chartConfig = append(chartConfig, config)
@@ -192,9 +210,15 @@ func helmChartConfig(core, solution *api.Helm, runtimeConfigs map[string]Runtime
 
 	}
 
-	if len(chartConfig) == 0 {
-		return nil
+	if len(unprocessedRuntimeCharts) > 0 {
+		// sort unknown slice to prevent status churn
+		unknown := slices.Sorted(maps.Keys(unprocessedRuntimeCharts))
+		return nil, RuntimeConfigError("Unknown chart references: " + strings.Join(unknown, ", "))
 	}
 
-	return chartConfig
+	if len(chartConfig) == 0 {
+		return nil, nil
+	}
+
+	return chartConfig, nil
 }
