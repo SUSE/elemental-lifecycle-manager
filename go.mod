@@ -8,7 +8,7 @@ require (
 	github.com/onsi/ginkgo/v2 v2.29.0
 	github.com/onsi/gomega v1.41.0
 	github.com/rancher/system-upgrade-controller/pkg/apis v0.0.0-20260409225933-38f3e11fd1dd
-	github.com/rancher/wrangler/v3 v3.4.0
+	github.com/rancher/wrangler/v3 v3.7.0
 	github.com/suse/elemental/v3 v3.1.0-alpha.20260528
 	go.yaml.in/yaml/v3 v3.0.4
 	helm.sh/helm/v4 v4.1.4
