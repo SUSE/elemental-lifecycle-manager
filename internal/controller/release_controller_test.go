@@ -31,7 +31,6 @@ import (
 
 	lifecyclev1alpha1 "github.com/suse/elemental-lifecycle-manager/api/v1alpha1"
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade"
-	"github.com/suse/elemental/v3/pkg/manifest/api"
 	"github.com/suse/elemental/v3/pkg/manifest/api/core"
 	"github.com/suse/elemental/v3/pkg/manifest/resolver"
 )
@@ -75,7 +74,6 @@ var _ = Describe("Release Controller", func() {
 
 				return &resolver.ResolvedManifest{
 					CorePlatform: &core.ReleaseManifest{
-						Metadata: &api.Metadata{},
 						Components: core.Components{
 							OperatingSystem: &core.OperatingSystem{},
 							Kubernetes:      &core.Kubernetes{},
