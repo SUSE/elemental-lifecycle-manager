@@ -5,7 +5,7 @@ go 1.26.3
 require (
 	github.com/google/go-containerregistry v0.21.7
 	github.com/k3s-io/helm-controller v0.17.7
-	github.com/onsi/ginkgo/v2 v2.29.0
+	github.com/onsi/ginkgo/v2 v2.32.0
 	github.com/onsi/gomega v1.41.0
 	github.com/rancher/system-upgrade-controller/pkg/apis v0.0.0-20260409225933-38f3e11fd1dd
 	github.com/rancher/wrangler/v3 v3.7.0
