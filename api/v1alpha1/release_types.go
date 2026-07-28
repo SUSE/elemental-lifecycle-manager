@@ -23,6 +23,7 @@ import (
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // Label identification for a Release resource.
@@ -169,5 +170,9 @@ type ReleaseList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&Release{}, &ReleaseList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(SchemeGroupVersion, &Release{}, &ReleaseList{})
+		metav1.AddToGroupVersion(s, SchemeGroupVersion)
+		return nil
+	})
 }
