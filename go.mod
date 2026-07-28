@@ -10,7 +10,7 @@ require (
 	github.com/rancher/system-upgrade-controller/pkg/apis v0.0.0-20260409225933-38f3e11fd1dd
 	github.com/rancher/wrangler/v3 v3.7.0
 	github.com/suse/elemental/v3 v3.1.0-alpha.20260528
-	go.yaml.in/yaml/v3 v3.0.4
+	go.yaml.in/yaml/v3 v3.0.5
 	helm.sh/helm/v4 v4.1.4
 	k8s.io/api v0.36.3
 	k8s.io/apiextensions-apiserver v0.36.3
