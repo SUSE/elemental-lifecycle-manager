@@ -13,3 +13,14 @@ updates:
       - "kind/dependabot"
     schedule:
       interval: "weekly"
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    allow:
+      - dependency-type: "direct"
+    security-updates-only: true
+    target-branch: release-0.1
+    labels:
+      - dependencies
+      - security
