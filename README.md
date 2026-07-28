@@ -55,7 +55,7 @@ Elemental Lifecycle Manager (LCM) can be easily installed through its OCI contai
       oci://registry.suse.com/elemental/charts/elemental-lifecycle-manager-crds \
       --namespace elemental-system \
       --create-namespace \
-      --version 0.1.0
+      --version 0.1.1
     ```
 
 2. Install LCM chart:
@@ -63,7 +63,7 @@ Elemental Lifecycle Manager (LCM) can be easily installed through its OCI contai
     helm install elemental-lifecycle-manager \
       oci://registry.suse.com/elemental/charts/elemental-lifecycle-manager \
       --namespace elemental-system \
-      --version 0.1.0
+      --version 0.1.1
     ```
 
 For more information on chart deployment and customization, refer to the [Helm Chart Reference](docs/helm-chart-ref.md) guide.
