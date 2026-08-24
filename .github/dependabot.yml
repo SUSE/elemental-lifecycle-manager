@@ -19,7 +19,8 @@ updates:
       interval: "daily"
     allow:
       - dependency-type: "direct"
-    security-updates-only: true
+    # https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#open-pull-requests-limit-
+    open-pull-requests-limit: 0
     target-branch: release-0.1
     labels:
       - dependencies
