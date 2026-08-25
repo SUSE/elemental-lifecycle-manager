@@ -65,13 +65,16 @@ type HelmReconciler struct {
 	releaseName string
 	// releaseVersion is the target release version
 	releaseVersion string
+	// strict defines if the reconciler should fail on upgrade of a chart
+	strict bool
 }
 
 // NewHelmReconciler creates a new Helm reconciler.
-func NewHelmReconciler(c client.Client, h helm.Client) *HelmReconciler {
+func NewHelmReconciler(c client.Client, h helm.Client, strict bool) *HelmReconciler {
 	return &HelmReconciler{
 		Client:     c,
 		helmClient: h,
+		strict:     strict,
 	}
 }
 
@@ -127,6 +130,15 @@ func (r *HelmReconciler) reconcileHelmCharts(ctx context.Context, releaseName, r
 		if state == helm.ChartStateInProgress {
 			logger.Info("Chart upgrade in progress, waiting", "chart", chartName)
 			break
+		}
+
+		if state == helm.ChartStateFailed && r.strict {
+			// Failure in upgrading a chart should result in overall upgrade failure,
+			// and prevent moving forward to any other upgrade phase
+			return &upgrade.PhaseStatus{
+				State:   lifecyclev1alpha1.UpgradeFailed,
+				Message: fmt.Sprintf("Failed to upgrade chart %q", chartName),
+			}, fmt.Errorf("upgrading chart %q", chartName)
 		}
 	}
 
@@ -273,7 +285,7 @@ func (r *HelmReconciler) updateHelmChart(ctx context.Context, chartConfig *upgra
 	chart := chartConfig.Chart
 	repoURL, err := r.resolveRepositoryURL(chartConfig)
 	if err != nil {
-		return fmt.Errorf("parsing repository URL for chart %q: %w", chart.Name, err)
+		return fmt.Errorf("parsing repository URL for chart %q: %w", chart.GetName(), err)
 	}
 
 	// Ensure labels are set for Release tracking
@@ -307,7 +319,7 @@ func (r *HelmReconciler) buildHelmChart(chartConfig *upgrade.HelmChartConfig, ta
 	name := chart.GetName()
 	repoURL, err := r.resolveRepositoryURL(chartConfig)
 	if err != nil {
-		return nil, fmt.Errorf("parsing repository URL for chart %q: %w", chart.Name, err)
+		return nil, fmt.Errorf("parsing repository URL for chart %q: %w", chart.GetName(), err)
 	}
 
 	if targetNamespace == "" {

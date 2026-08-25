@@ -21,11 +21,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
+	"github.com/suse/elemental-lifecycle-manager/internal/helm"
+	"github.com/suse/elemental/v3/pkg/manifest/api"
+	"go.yaml.in/yaml/v3"
 	"k8s.io/apimachinery/pkg/api/equality"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -46,13 +51,24 @@ import (
 
 const requeueInterval = 30 * time.Second
 
+const (
+	elementalLifecycleManager     = "elemental-lifecycle-manager"
+	elementalLifecycleManagerCRDs = "elemental-lifecycle-manager-crds"
+)
+
 // ReleaseReconciler reconciles a Release object
 type ReleaseReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme *k8sruntime.Scheme
 
 	RetrieveManifest func(ctx context.Context, registry, version string) (*resolver.ResolvedManifest, error)
 	Pipeline         *upgrade.Pipeline
+	HelmClient       helm.Client
+
+	// RawManifests holds the raw core manifest used by the LCM self-upgrade phase. It is deliberately
+	// in-memory only: once LCMUpgraded is True the phase is skipped, so the manifest is only needed
+	// while LCM is upgrading itself, and after a restart it can be fetched from the registry again.
+	RawManifests map[string][]byte
 }
 
 // +kubebuilder:rbac:groups=lifecycle.suse.com,resources=releases,verbs=get;list;watch;create;update;patch;delete
@@ -114,6 +130,37 @@ func (r *ReleaseReconciler) reconcileNormal(ctx context.Context, release *lifecy
 
 	defer updateAppliedCondition(release, r.Pipeline.Phases())
 
+	var err error
+	// result must be non-nil even when the LCM phase is skipped, since the pipeline records its phase states in it.
+	result := &upgrade.Result{PhaseStates: make(map[upgrade.Phase]*upgrade.PhaseStatus)}
+	if !apimeta.IsStatusConditionTrue(release.Status.Conditions, upgrade.PhaseLCM.ConditionType()) {
+		config, err := r.lcmUpgradeConfig(ctx, release)
+		if err != nil {
+			if runtimeConfigErr, ok := errors.AsType[upgrade.RuntimeConfigError](err); ok {
+				// Use info-level logging rather than returning the error. Since the error is related to
+				// user misconfiguration, this ensures that the controller does not needlessly requeue
+				// until the user fixes the underlying configuration issue.
+				logger.Info("Invalid component configuration in Release resource", "error", runtimeConfigErr.Error())
+
+				setCondition(release, lifecyclev1alpha1.ConditionApplied, metav1.ConditionFalse,
+					lifecyclev1alpha1.UpgradeFailed, runtimeConfigErr.Error())
+				return ctrl.Result{}, nil
+			}
+			return ctrl.Result{}, fmt.Errorf("parsing upgrade config for LCM upgrade: %w", err)
+		}
+
+		status, err := r.reconcileLCM(ctx, config)
+		if err != nil {
+			setPhaseConditionFromError(release, err)
+			logger.Error(err, "LCM upgrade failed")
+			return ctrl.Result{}, nil
+		}
+		updatePhaseCondition(release, upgrade.PhaseLCM, status)
+
+		if status.State != lifecyclev1alpha1.UpgradeSucceeded {
+			return ctrl.Result{RequeueAfter: requeueInterval}, nil
+		}
+	}
 	manifest, err := r.getOrRetrieveManifest(ctx, release)
 	if err != nil {
 		setCondition(release, lifecyclev1alpha1.ConditionManifestResolved, metav1.ConditionFalse,
@@ -147,7 +194,7 @@ func (r *ReleaseReconciler) reconcileNormal(ctx context.Context, release *lifecy
 		}
 	}
 
-	result, err := r.Pipeline.Reconcile(ctx, config)
+	result, err = r.Pipeline.Reconcile(ctx, config)
 	if err != nil {
 		setPhaseConditionFromError(release, err)
 		return ctrl.Result{}, fmt.Errorf("reconciling upgrade: %w", err)
@@ -163,13 +210,161 @@ func (r *ReleaseReconciler) reconcileNormal(ctx context.Context, release *lifecy
 	return ctrl.Result{RequeueAfter: requeueInterval}, nil
 }
 
+func (r *ReleaseReconciler) reconcileLCM(ctx context.Context, config *upgrade.Config) (*upgrade.PhaseStatus, error) {
+	lcmReconciler := reconcilers.NewHelmReconciler(r.Client, r.HelmClient, true)
+	status, err := lcmReconciler.Reconcile(ctx, config)
+	if err != nil {
+		return &upgrade.PhaseStatus{},
+			&upgrade.PhaseError{
+				Phase: upgrade.PhaseLCM,
+				Err:   err,
+			}
+	}
+
+	return status, nil
+}
+
+func runtimeHelmChartConfigs(release *lifecyclev1alpha1.Release, charts ...string) map[string]upgrade.RuntimeHelmChartConfig {
+	componentConfig := release.Spec.ComponentConfig
+	if componentConfig == nil {
+		return nil
+	}
+
+	var configs map[string]upgrade.RuntimeHelmChartConfig
+	for _, c := range componentConfig.Helm {
+		if len(charts) > 0 && !slices.Contains(charts, c.Chart) {
+			continue
+		}
+
+		var secretRef *upgrade.RuntimeSecretValueSource
+		if ref := c.ValuesFrom.SecretRef; ref != nil {
+			secretRef = &upgrade.RuntimeSecretValueSource{Name: ref.Name, Keys: ref.Keys}
+		}
+
+		if configs == nil {
+			configs = make(map[string]upgrade.RuntimeHelmChartConfig)
+		}
+		configs[c.Chart] = upgrade.RuntimeHelmChartConfig{
+			Values:     c.Values,
+			ValuesFrom: upgrade.RuntimeHelmChartValuesFrom{SecretRef: secretRef},
+		}
+	}
+	return configs
+}
+
+// lcmUpgradeConfig parses a Release instance and creates an upgrade.Config for the purpose of self-upgrading LCM
+// by focusing only on LCM charts.
+func (r *ReleaseReconciler) lcmUpgradeConfig(ctx context.Context, release *lifecyclev1alpha1.Release) (*upgrade.Config, error) {
+	data, err := r.getOrRetrieveUpgradeManifest(ctx, release)
+	if err != nil {
+		return nil, err
+	}
+
+	var core struct {
+		Components struct {
+			Helm struct {
+				Charts []struct {
+					Chart      string         `yaml:"chart"`
+					Repository string         `yaml:"repository"`
+					Version    string         `yaml:"version"`
+					Values     map[string]any `yaml:"values"`
+				} `yaml:"charts"`
+				Repositories []struct {
+					Name string `yaml:"name"`
+					URL  string `yaml:"url"`
+				} `yaml:"repositories"`
+			} `yaml:"helm"`
+		} `yaml:"components"`
+	}
+
+	err = yaml.Unmarshal(data, &core)
+	if err != nil {
+		return &upgrade.Config{}, err
+	}
+
+	runtimeCharts := runtimeHelmChartConfigs(release, elementalLifecycleManager)
+
+	var charts []*api.HelmChart
+	for _, chart := range core.Components.Helm.Charts {
+		if chart.Chart == elementalLifecycleManager || chart.Chart == elementalLifecycleManagerCRDs {
+			c := api.HelmChart{
+				Chart:      chart.Chart,
+				Repository: chart.Repository,
+				Version:    chart.Version,
+				Values:     chart.Values,
+			}
+			charts = append(charts, &c)
+		}
+	}
+	var repositories []*api.HelmRepository
+	for _, repo := range core.Components.Helm.Repositories {
+		r := api.HelmRepository{
+			Name: repo.Name,
+			URL:  repo.URL,
+		}
+		repositories = append(repositories, &r)
+	}
+	// Create a Helm Reconciler for LCM charts
+	// Create a upgrade.Config from the values we have available
+	// Hand over to Helm Reconciler created for LCM charts
+	helmCharts := api.Helm{
+		Charts:       charts,
+		Repositories: repositories,
+	}
+	helmChartConfig, err := upgrade.BuildHelmChartConfig(&helmCharts, nil, runtimeCharts)
+	if err != nil {
+		return &upgrade.Config{}, err
+	}
+
+	return &upgrade.Config{
+		ReleaseNamespacedName: types.NamespacedName{Name: release.Name, Namespace: release.Namespace},
+		ReleaseVersion:        release.Spec.Version,
+		HelmCharts:            helmChartConfig,
+	}, nil
+}
+
+// getOrRetrieveUpgradeManifest returns the raw Core manifest bytes for the Release used to trigger the upgrade.
+// The raw bytes are kept separate from the ResolvedManifest because the LCM phase must not depend on the
+// elemental manifest library's types, and are cached in memory only.
+func (r *ReleaseReconciler) getOrRetrieveUpgradeManifest(ctx context.Context, release *lifecyclev1alpha1.Release) ([]byte, error) {
+	imageRef := fmt.Sprintf("%s:%s", release.Spec.Registry, release.Spec.Version)
+	if data, ok := r.RawManifests[imageRef]; ok {
+		return data, nil
+	}
+
+	manifestData, err := releasecache.ReadManifest(ctx, imageRef)
+	if err != nil {
+		return nil, err
+	}
+
+	var solution struct {
+		CorePlatform struct {
+			Image string `yaml:"image"`
+		} `yaml:"corePlatform"`
+	}
+	if err = yaml.Unmarshal(manifestData, &solution); err != nil {
+		return nil, err
+	}
+
+	if solution.CorePlatform.Image != "" {
+		// we're working with a solution manifest; let's grab the core manifest for LCM charts
+		manifestData, err = releasecache.ReadManifest(ctx, solution.CorePlatform.Image)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	r.RawManifests[imageRef] = manifestData
+	return manifestData, nil
+}
+
 // updateReleaseStatus persists the specified release status using the latest Release resource state.
 // Additionally it retries when hitting a release status update conflict, as the Release resource may have been modified
 // between the reconciler's initial fetch and the status update.
-func (r *ReleaseReconciler) updateReleaseStatus(ctx context.Context, name types.NamespacedName, status lifecyclev1alpha1.ReleaseStatus) error {
+func (r *ReleaseReconciler) updateReleaseStatus(ctx context.Context, namespacedName types.NamespacedName, status lifecyclev1alpha1.ReleaseStatus) error {
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		latest := &lifecyclev1alpha1.Release{}
-		if err := r.Get(ctx, name, latest); err != nil {
+		if err := r.Get(ctx, namespacedName, latest); err != nil {
 			return client.IgnoreNotFound(err)
 		}
 
@@ -242,31 +437,17 @@ func (r *ReleaseReconciler) parseUpgradeConfig(ctx context.Context, manifest *re
 		return nil, fmt.Errorf("parsing drain options: %w", err)
 	}
 
-	runtimeConfig := &upgrade.RuntimeConfig{DrainOpts: opts}
+	runtimeConfig := &upgrade.RuntimeConfig{DrainOpts: opts, HelmCharts: runtimeHelmChartConfigs(release)}
 
-	componentConfig := release.Spec.ComponentConfig
-	if componentConfig != nil {
-		if len(componentConfig.Helm) > 0 {
-			runtimeChartConfigs := make(map[string]upgrade.RuntimeHelmChartConfig)
-			for _, runtimeChartConfig := range componentConfig.Helm {
-				var secretRef *upgrade.RuntimeSecretValueSource
-				if runtimeChartConfig.ValuesFrom.SecretRef != nil {
-					secretRef = &upgrade.RuntimeSecretValueSource{
-						Name: runtimeChartConfig.ValuesFrom.SecretRef.Name,
-						Keys: runtimeChartConfig.ValuesFrom.SecretRef.Keys,
-					}
-				}
-				runtimeChartConfigs[runtimeChartConfig.Chart] = upgrade.RuntimeHelmChartConfig{
-					Values:     runtimeChartConfig.Values,
-					ValuesFrom: upgrade.RuntimeHelmChartValuesFrom{SecretRef: secretRef},
-				}
-			}
-
-			runtimeConfig.HelmCharts = runtimeChartConfigs
-		}
+	config, err = upgrade.NewConfig(manifest, release.Spec.Version, types.NamespacedName{Name: release.Name, Namespace: release.Namespace}, runtimeConfig)
+	if err != nil {
+		return nil, err
 	}
-
-	return upgrade.NewConfig(manifest, release.Spec.Version, types.NamespacedName{Name: release.Name, Namespace: release.Namespace}, runtimeConfig)
+	// remove LCM related charts from config because they should be updated by self-upgrade phase
+	config.HelmCharts = slices.DeleteFunc(config.HelmCharts, func(c *upgrade.HelmChartConfig) bool {
+		return slices.Contains([]string{elementalLifecycleManager, elementalLifecycleManagerCRDs}, c.Chart.Chart)
+	})
+	return config, nil
 }
 
 // cleanupOldVersionPlans deletes SUC Plans from a previous version.

@@ -16,6 +16,7 @@ The table below summarizes the conditions LCM reports during an upgrade:
 
 | Condition Type       | Description |
 |----------------------|-------------|
+| `LCMUpgraded`        | Tracks the LCM upgrade phase which upgrades the Helm charts for LCM itself and its CRDs if found in the manifest under upgrade |
 | `ManifestResolved`   | Indicates whether LCM retrieved and resolved the [release manifest](https://github.com/SUSE/elemental/blob/main/docs/release-manifest.md) for the requested version. |
 | `OSUpgraded`         | Tracks the operating system upgrade phase, including the related System Upgrade Controller Plans for `control-plane` and `worker` nodes. |
 | `KubernetesUpgraded` | Tracks the Kubernetes upgrade phase, including related System Upgrade Controller Plans and the availability of packaged Kubernetes components after node upgrades complete. |
@@ -25,6 +26,18 @@ The table below summarizes the conditions LCM reports during an upgrade:
 ## Troubleshooting Failed Conditions
 
 This section provides troubleshooting steps for each `Release` condition when it reports as `Failed` or stays `InProgress` longer than expected.
+
+### Lifecycle Manager Upgrade
+
+Condition type: `LCMUpgraded`
+
+If this phase fails or stops progressing, inspect the following resources:
+
+
+| Resource                | Namespace                 | Name        | Description |
+|-------------------------|---------------------------|-------------|------------- |
+| Helm Chart Pod | `kube-system` | `helm-install-<chart-name>` | Inspect the Pod logs for Helm chart errors. |
+| LCM Pod | `elemental-system` | LCM Pod name | Inspect LCM's logs for LCM charts upgrade reconciliation errors. |
 
 ### Release Manifest Retrieval
 
