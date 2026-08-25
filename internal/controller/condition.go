@@ -60,8 +60,7 @@ func initializePendingConditions(release *lifecyclev1alpha1.Release, phases []up
 
 // setPhaseConditionFromError sets a failed condition based on a PhaseError.
 func setPhaseConditionFromError(release *lifecyclev1alpha1.Release, err error) {
-	var phaseErr *upgrade.PhaseError
-	if errors.As(err, &phaseErr) {
+	if phaseErr, ok := errors.AsType[*upgrade.PhaseError](err); ok {
 		setCondition(release, phaseErr.Phase.ConditionType(), metav1.ConditionFalse,
 			lifecyclev1alpha1.UpgradeFailed, phaseErr.Err.Error())
 	}
