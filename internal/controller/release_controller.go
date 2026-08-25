@@ -126,8 +126,7 @@ func (r *ReleaseReconciler) reconcileNormal(ctx context.Context, release *lifecy
 
 	config, err := r.parseUpgradeConfig(ctx, manifest, release)
 	if err != nil {
-		var runtimeConfigErr upgrade.RuntimeConfigError
-		if errors.As(err, &runtimeConfigErr) {
+		if runtimeConfigErr, ok := errors.AsType[upgrade.RuntimeConfigError](err); ok {
 			// Use info-level logging rather than returning the error. Since the error is related to
 			// user misconfiguration, this ensures that the controller does not needlessly requeue
 			// until the user fixes the underlying configuration issue.
