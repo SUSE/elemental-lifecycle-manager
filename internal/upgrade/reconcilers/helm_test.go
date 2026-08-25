@@ -62,7 +62,7 @@ var _ = Describe("HelmReconciler", func() {
 		scheme = testutil.NewTestScheme()
 		fakeClient = testutil.NewFakeClient(scheme)
 		mockHelm = testutil.NewMockHelmClient()
-		reconciler = reconcilers.NewHelmReconciler(fakeClient, mockHelm)
+		reconciler = reconcilers.NewHelmReconciler(fakeClient, mockHelm, false, "Helm")
 	})
 
 	Describe("Phase", func() {
@@ -101,7 +101,7 @@ var _ = Describe("HelmReconciler", func() {
 			var chart1 *api.HelmChart
 
 			BeforeEach(func() {
-				chart1 = testutil.NewTestHelmChart(testChart1Name, "1.0.0")
+				chart1 = testutil.NewTestHelmChart(testChart1Name, testChartVersion)
 				config = testutil.NewTestConfig(testutil.WithHelmChartConfig([]*upgrade.HelmChartConfig{{Chart: chart1}}))
 			})
 
@@ -361,6 +361,10 @@ var _ = Describe("HelmReconciler", func() {
 
 					// Ensure that the chart version was correctly updated.
 					Expect(helmChart.Spec.Version).To(Equal("2.0.0"))
+
+					// Ensure the labels are applied
+					Expect(helmChart.Labels).To(HaveKeyWithValue(lifecyclev1alpha1.ReleaseNameLabel, config.ReleaseNamespacedName.Name))
+					Expect(helmChart.Labels).To(HaveKeyWithValue(lifecyclev1alpha1.ReleaseVersionLabel, lifecyclev1alpha1.SanitizeVersion(config.ReleaseVersion)))
 
 					// Ensure install time custom values are not corrupted.
 					expectedInstallValues, err := yaml.Marshal(installTimeValues)
