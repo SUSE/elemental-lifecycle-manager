@@ -109,7 +109,7 @@ func (r *ReleaseReconciler) reconcileNormal(ctx context.Context, release *lifecy
 		release.Status.Conditions = nil
 		initializePendingConditions(release, r.Pipeline.Phases())
 
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 
 	defer updateAppliedCondition(release, r.Pipeline.Phases())
