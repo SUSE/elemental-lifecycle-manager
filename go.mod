@@ -6,7 +6,7 @@ require (
 	github.com/google/go-containerregistry v0.22.0
 	github.com/k3s-io/helm-controller v0.17.8
 	github.com/onsi/ginkgo/v2 v2.32.1
-	github.com/onsi/gomega v1.42.1
+	github.com/onsi/gomega v1.43.0
 	github.com/rancher/system-upgrade-controller/pkg/apis v0.0.0-20260409225933-38f3e11fd1dd
 	github.com/rancher/wrangler/v3 v3.7.1
 	github.com/suse/elemental/v3 v3.1.0-alpha.20260528
