@@ -29,6 +29,8 @@ import (
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade/reconcilers"
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade/reconcilers/testutil"
 	"github.com/suse/elemental/v3/pkg/manifest/api"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -201,6 +203,78 @@ var _ = Describe("LCMReconciler", func() {
 				Expect(err).ToNot(HaveOccurred())
 				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeSucceeded))
 				Expect(status.Message).To(Equal("All 2 LCM charts upgraded successfully (0 skipped)"))
+			})
+
+			FIt("should not error even if the charts fail to upgrade", func() {
+				lcmChart := testutil.NewTestHelmChart(lcmChartName, lcmChartV2, testutil.WithDependencies([]api.HelmChartDependency{{Name: lcmCRDChartName, Type: api.DependencyTypeHelm}}))
+				lcmCRDChart := testutil.NewTestHelmChart(lcmCRDChartName, lcmCRDChartV2)
+				config := testutil.NewTestConfig(testutil.WithHelmChartConfig([]*upgrade.HelmChartConfig{
+					{
+						Chart: lcmChart,
+					},
+					{
+						Chart: lcmCRDChart,
+					},
+				}))
+
+				mockHelm.RetrieveReleaseFn = func(name string) (*helm.ReleaseInfo, error) {
+					switch name {
+					case lcmChartName:
+						return &helm.ReleaseInfo{ChartVersion: lcmChartV1, Namespace: testNamespace}, nil
+					case lcmCRDChartName:
+						return &helm.ReleaseInfo{ChartVersion: lcmCRDChartV1, Namespace: testNamespace}, nil
+					}
+					return nil, helm.ErrReleaseNotFound
+				}
+
+				status, err := reconciler.Reconcile(ctx, config)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
+
+				// HelmChart CR for LCM CRDs should be created first as it's a dependency of LCM chart.
+				helmLCMCRDChart := &helmv1.HelmChart{}
+				Expect(fakeClient.Get(ctx, types.NamespacedName{
+					Name:      lcmCRDChartName,
+					Namespace: reconcilers.HelmChartNamespace,
+				}, helmLCMCRDChart)).To(Succeed())
+
+				// HelmChart CR for LCM chart shouldn't be created yet
+				helmLCMChart := &helmv1.HelmChart{}
+				err = fakeClient.Get(ctx, types.NamespacedName{Name: lcmChartName, Namespace: reconcilers.HelmChartNamespace}, helmLCMChart)
+				Expect(apierrors.IsNotFound(err)).To(BeTrue())
+
+				helmLCMCRDChart.Status.JobName = testJobCRDS
+				Expect(fakeClient.Update(ctx, helmLCMCRDChart)).To(Succeed())
+
+				failedJob := testutil.NewTestJob(testJobCRDS, reconcilers.HelmChartNamespace, false)
+				failedJob.Status.Conditions = append(failedJob.Status.Conditions, batchv1.JobCondition{Type: batchv1.JobFailed, Status: corev1.ConditionTrue})
+				Expect(fakeClient.Create(ctx, failedJob)).To(Succeed())
+
+				status, err = reconciler.Reconcile(ctx, config)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeFailed))
+				//Expect(status.Message).To(Equal("LCM charts in progress (1/2 completed, 0 skipped)"))
+
+				// Now the HelmChart CR for LCM should be created.
+				Expect(fakeClient.Get(ctx, types.NamespacedName{
+					Name:      lcmChartName,
+					Namespace: reconcilers.HelmChartNamespace,
+				}, helmLCMChart)).To(Succeed())
+
+				helmLCMChart.Status.JobName = testJobLCM
+				Expect(fakeClient.Update(ctx, helmLCMChart)).To(Succeed())
+
+				failedJob2 := testutil.NewTestJob(testJobLCM, reconcilers.HelmChartNamespace, false)
+				failedJob2.Status.Conditions = append(failedJob2.Status.Conditions, batchv1.JobCondition{Type: batchv1.JobFailed, Status: corev1.ConditionTrue})
+				Expect(fakeClient.Create(ctx, failedJob2)).To(Succeed())
+
+				status, err = reconciler.Reconcile(ctx, config)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeFailed))
+				//Expect(status.Message).To(Equal("All 2 LCM charts upgraded successfully (0 skipped)"))
+
+				status, err = reconciler.Reconcile(ctx, config)
+				Expect(err).ToNot(HaveOccurred())
 			})
 		})
 	})
