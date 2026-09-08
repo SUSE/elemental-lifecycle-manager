@@ -9,7 +9,7 @@ require (
 	github.com/onsi/gomega v1.43.0
 	github.com/rancher/system-upgrade-controller/pkg/apis v0.0.0-20260409225933-38f3e11fd1dd
 	github.com/rancher/wrangler/v3 v3.7.1
-	github.com/suse/elemental/v3 v3.1.0-alpha.20260528
+	github.com/suse/elemental/v3 v3.1.0-alpha.20260901
 	go.yaml.in/yaml/v3 v3.0.5
 	helm.sh/helm/v4 v4.2.4
 	k8s.io/api v0.36.4
@@ -47,7 +47,7 @@ require (
 	github.com/go-openapi/swag v0.23.1 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
-	github.com/go-playground/validator/v10 v10.30.2 // indirect
+	github.com/go-playground/validator/v10 v10.30.3 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
 	github.com/google/cel-go v0.29.0 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
@@ -78,7 +78,7 @@ require (
 	github.com/prometheus/common v0.67.5 // indirect
 	github.com/prometheus/procfs v0.20.1 // indirect
 	github.com/rubenv/sql-migrate v1.8.1 // indirect
-	github.com/sirupsen/logrus v1.9.4 // indirect
+	github.com/sirupsen/logrus v1.10.1 // indirect
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/twpayne/go-vfs/v4 v4.3.0 // indirect
