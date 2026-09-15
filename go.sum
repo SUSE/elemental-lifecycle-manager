@@ -171,8 +171,8 @@ github.com/prometheus/procfs v0.20.1 h1:XwbrGOIplXW/AU3YhIhLODXMJYyC1isLFfYCsTEy
 github.com/prometheus/procfs v0.20.1/go.mod h1:o9EMBZGRyvDrSPH1RqdxhojkuXstoe4UlK79eF5TGGo=
 github.com/rancher/system-upgrade-controller/pkg/apis v0.0.0-20260409225933-38f3e11fd1dd h1:lfbqf3ikhATMG4XQnGI23DkNaaxfEDsHzK+FoRxbYVI=
 github.com/rancher/system-upgrade-controller/pkg/apis v0.0.0-20260409225933-38f3e11fd1dd/go.mod h1:SUiQyIpckuP2ZGusrd+avYyt5WTQ9wuvhffw/ukbcrk=
-github.com/rancher/wrangler/v3 v3.7.1 h1:3IoJWG8YEsPJ3oYXEDTNjITsrqxDuDz722ivCFXQOGQ=
-github.com/rancher/wrangler/v3 v3.7.1/go.mod h1:SRd8RgvLACW1sOeOE/JagsO1gWVgSduKGQtPSsKzntI=
+github.com/rancher/wrangler/v3 v3.7.2 h1:a1lNVgK43TaAnLa/jXk12HeedxO55BpAHD7NNinQnQg=
+github.com/rancher/wrangler/v3 v3.7.2/go.mod h1:VdeegQBV74Ci6+zoffAB8GowURO1aMy6dg5HiIi5tr4=
 github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=
 github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=
 github.com/rubenv/sql-migrate v1.8.1 h1:EPNwCvjAowHI3TnZ+4fQu3a915OpnQoPAjTXCGOy2U0=
