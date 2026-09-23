@@ -206,6 +206,7 @@ func main() {
 		Scheme:           mgr.GetScheme(),
 		RetrieveManifest: release.RetrieveManifest,
 		Pipeline: upgrade.NewPipeline(
+			reconcilers.NewLCMReconciler(k8sClient, helmClient),
 			reconcilers.NewOSReconciler(k8sClient, sucPlanReconciler),
 			reconcilers.NewKubernetesReconciler(
 				k8sClient,

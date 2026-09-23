@@ -101,7 +101,7 @@ var _ = Describe("HelmReconciler", func() {
 			var chart1 *api.HelmChart
 
 			BeforeEach(func() {
-				chart1 = testutil.NewTestHelmChart(testChart1Name, "1.0.0")
+				chart1 = testutil.NewTestHelmChart(testChart1Name, testChartVersion)
 				config = testutil.NewTestConfig(testutil.WithHelmChartConfig([]*upgrade.HelmChartConfig{{Chart: chart1}}))
 			})
 
@@ -132,6 +132,36 @@ var _ = Describe("HelmReconciler", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeSucceeded))
 				Expect(status.Message).To(ContainSubstring("skipped"))
+			})
+
+			It("should skip LCM charts as they are handled by LCMReconciler", func() {
+				lcmChart := testutil.NewTestHelmChart("elemental-lifecycle-manager", "0.2.1")
+				config = testutil.NewTestConfig(testutil.WithHelmChartConfig([]*upgrade.HelmChartConfig{{Chart: lcmChart}}))
+				status, err := reconciler.Reconcile(ctx, config)
+
+				Expect(err).ToNot(HaveOccurred())
+				Expect(status).ToNot(BeNil())
+				Expect(status.Message).To(Equal("No Helm charts to reconcile"))
+			})
+
+			It("should skip LCM chart and reconcile other charts successfully", func() {
+				lcmChart := testutil.NewTestHelmChart("elemental-lifecycle-manager", "0.2.1")
+				config = testutil.NewTestConfig(testutil.WithHelmChartConfig([]*upgrade.HelmChartConfig{{Chart: lcmChart}, {Chart: chart1}}))
+
+				mockHelm.RetrieveReleaseFn = func(name string) (*helm.ReleaseInfo, error) {
+					return &helm.ReleaseInfo{
+						ChartVersion: testChartVersion,
+						Namespace:    testNamespace,
+						Config:       map[string]any{},
+						Revisions:    1,
+					}, nil
+				}
+
+				status, err := reconciler.Reconcile(ctx, config)
+
+				Expect(err).NotTo(HaveOccurred())
+				Expect(status).NotTo(BeNil())
+				Expect(status.Message).To(Equal("All 1 Helm charts upgraded successfully (0 skipped)"))
 			})
 
 			It("should return error on helm client failure", func() {
@@ -361,6 +391,10 @@ var _ = Describe("HelmReconciler", func() {
 
 					// Ensure that the chart version was correctly updated.
 					Expect(helmChart.Spec.Version).To(Equal("2.0.0"))
+
+					// Ensure the labels are applied
+					Expect(helmChart.Labels).To(HaveKeyWithValue(lifecyclev1alpha1.ReleaseNameLabel, config.ReleaseNamespacedName.Name))
+					Expect(helmChart.Labels).To(HaveKeyWithValue(lifecyclev1alpha1.ReleaseVersionLabel, lifecyclev1alpha1.SanitizeVersion(config.ReleaseVersion)))
 
 					// Ensure install time custom values are not corrupted.
 					expectedInstallValues, err := yaml.Marshal(installTimeValues)

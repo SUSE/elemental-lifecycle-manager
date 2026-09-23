@@ -29,6 +29,7 @@ type Phase string
 
 // Phase constants derived from condition types.
 var (
+	PhaseLCM        = Phase(strings.TrimSuffix(lifecyclev1alpha1.ConditionLCMUpgraded, "Upgraded"))
 	PhaseOS         = Phase(strings.TrimSuffix(lifecyclev1alpha1.ConditionOSUpgraded, "Upgraded"))
 	PhaseKubernetes = Phase(strings.TrimSuffix(lifecyclev1alpha1.ConditionKubernetesUpgraded, "Upgraded"))
 	PhaseHelmCharts = Phase(strings.TrimSuffix(lifecyclev1alpha1.ConditionHelmChartsUpgraded, "Upgraded"))
