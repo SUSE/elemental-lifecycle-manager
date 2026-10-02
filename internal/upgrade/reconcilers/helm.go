@@ -97,7 +97,15 @@ func (r *HelmReconciler) reconcileHelmCharts(ctx context.Context, releaseName, r
 	r.releaseName = releaseName
 	r.releaseVersion = releaseVersion
 
-	orderedChartConfigs, err := sortChartConfigsByDependencies(chartConfigs)
+	var workloadCharts []*upgrade.HelmChartConfig
+	for _, chartCfg := range chartConfigs {
+		name := chartCfg.Chart.GetName()
+		if !isLCMChart(name) {
+			workloadCharts = append(workloadCharts, chartCfg)
+		}
+	}
+
+	orderedChartConfigs, err := sortChartConfigsByDependencies(workloadCharts)
 	if err != nil {
 		return &upgrade.PhaseStatus{
 			State:   lifecyclev1alpha1.UpgradeFailed,
@@ -130,7 +138,7 @@ func (r *HelmReconciler) reconcileHelmCharts(ctx context.Context, releaseName, r
 		}
 	}
 
-	return r.aggregateResults(results, len(orderedChartConfigs)), nil
+	return aggregateResults(results, len(orderedChartConfigs)), nil
 }
 
 // sortChartConfigsByDependencies returns a sorted slice of chart configurations,
@@ -405,7 +413,7 @@ func (r *HelmReconciler) evaluateHelmChartJobStatus(ctx context.Context, chart *
 }
 
 // aggregateResults aggregates chart upgrade results into a single PhaseStatus.
-func (r *HelmReconciler) aggregateResults(results []chartUpgradeResult, totalCharts int) *upgrade.PhaseStatus {
+func aggregateResults(results []chartUpgradeResult, totalCharts int) *upgrade.PhaseStatus {
 	if len(results) == 0 {
 		return &upgrade.PhaseStatus{
 			State:   lifecyclev1alpha1.UpgradeSucceeded,
