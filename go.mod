@@ -1,10 +1,10 @@
 module github.com/suse/elemental-lifecycle-manager
 
-go 1.26.3
+go 1.26.7
 
 require (
 	github.com/google/go-containerregistry v0.22.0
-	github.com/k3s-io/helm-controller v0.17.8
+	github.com/k3s-io/helm-controller v0.17.9
 	github.com/onsi/ginkgo/v2 v2.32.1
 	github.com/onsi/gomega v1.44.0
 	github.com/rancher/system-upgrade-controller/pkg/apis v0.0.0-20260409225933-38f3e11fd1dd
