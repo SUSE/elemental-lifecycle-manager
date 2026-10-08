@@ -148,7 +148,7 @@ func NewConfig(manifest *resolver.ResolvedManifest, releaseVersion string, relea
 		solutionCharts = manifest.SolutionExtension.Components.Helm
 	}
 
-	charts, err := helmChartConfig(core.Components.Helm, solutionCharts, runtimeConfig.HelmCharts)
+	charts, err := BuildHelmChartConfig(core.Components.Helm, solutionCharts, runtimeConfig.HelmCharts)
 	if err != nil {
 		return nil, fmt.Errorf("parsing helm chart configuration: %w", err)
 	}
@@ -157,8 +157,8 @@ func NewConfig(manifest *resolver.ResolvedManifest, releaseVersion string, relea
 	return config, nil
 }
 
-// helmChartConfig merges Helm configurations from the core and solution manifests with any runtime-defined overrides.
-func helmChartConfig(core, solution *api.Helm, runtimeConfigs map[string]RuntimeHelmChartConfig) ([]*HelmChartConfig, error) {
+// BuildHelmChartConfig merges Helm configurations from the core and solution manifests with any runtime-defined overrides.
+func BuildHelmChartConfig(core, solution *api.Helm, runtimeConfigs map[string]RuntimeHelmChartConfig) ([]*HelmChartConfig, error) {
 	chartConfig := []*HelmChartConfig{}
 	unprocessedRuntimeCharts := make(map[string]struct{}, len(runtimeConfigs))
 	for chart := range runtimeConfigs {

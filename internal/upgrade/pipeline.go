@@ -53,11 +53,7 @@ func NewPipeline(handlers ...PhaseHandler) *Pipeline {
 // - A phase has not yet succeeded (allowing retry on next reconcile)
 // - All phases complete successfully - a completed phase is a phase with a
 // status marked as either 'Succeeded' or 'Skipped'
-func (p *Pipeline) Reconcile(ctx context.Context, config *Config) (*Result, error) {
-	result := &Result{
-		PhaseStates: make(map[Phase]*PhaseStatus),
-	}
-
+func (p *Pipeline) Reconcile(ctx context.Context, config *Config, result *Result) (*Result, error) {
 	if config == nil {
 		return result, fmt.Errorf("upgrade config is nil")
 	}

@@ -39,13 +39,20 @@ func setCondition(release *lifecyclev1alpha1.Release, conditionType string, stat
 
 // initializePendingConditions marks all upgrade relevant conditions as pending.
 func initializePendingConditions(release *lifecyclev1alpha1.Release, phases []upgrade.Phase) {
+	// apply LCM related condition before everything else.
+	conditionType := upgrade.PhaseLCM.ConditionType()
+	if apimeta.FindStatusCondition(release.Status.Conditions, conditionType) == nil {
+		setCondition(release, conditionType, metav1.ConditionFalse,
+			lifecyclev1alpha1.UpgradePending, "Waiting for LCM upgrade phase to complete")
+	}
+
 	if apimeta.FindStatusCondition(release.Status.Conditions, lifecyclev1alpha1.ConditionManifestResolved) == nil {
 		setCondition(release, lifecyclev1alpha1.ConditionManifestResolved, metav1.ConditionFalse,
 			lifecyclev1alpha1.UpgradePending, "Waiting for release manifest to be resolved")
 	}
 
 	for _, phase := range phases {
-		conditionType := phase.ConditionType()
+		conditionType = phase.ConditionType()
 		if apimeta.FindStatusCondition(release.Status.Conditions, conditionType) == nil {
 			setCondition(release, conditionType, metav1.ConditionFalse,
 				lifecyclev1alpha1.UpgradePending, "Waiting for previous phases to complete")
@@ -92,11 +99,21 @@ func updatePhaseCondition(release *lifecyclev1alpha1.Release, phase upgrade.Phas
 
 // updateAppliedCondition sets the Applied condition based on all phase conditions.
 func updateAppliedCondition(release *lifecyclev1alpha1.Release, phases []upgrade.Phase) {
+	// if LCM upgrade has failed, set all the remaining phases to Skipped
+	lcmCond := apimeta.FindStatusCondition(release.Status.Conditions, upgrade.PhaseLCM.ConditionType())
+	if lcmCond != nil && lcmCond.Status == metav1.ConditionFalse && lcmCond.Reason == lifecyclev1alpha1.UpgradeFailed {
+		skipRemainingPhases(release, phases)
+		return
+	}
 	// Check if manifest is retrieved
 	manifestCond := apimeta.FindStatusCondition(release.Status.Conditions, lifecyclev1alpha1.ConditionManifestResolved)
-	if manifestCond == nil || manifestCond.Status != metav1.ConditionTrue {
+	switch {
+	case manifestCond != nil && manifestCond.Reason == lifecyclev1alpha1.UpgradeFailed:
 		setCondition(release, lifecyclev1alpha1.ConditionApplied, metav1.ConditionFalse,
-			lifecyclev1alpha1.UpgradeFailed, "Manifest not retrieved")
+			lifecyclev1alpha1.UpgradeFailed, manifestCond.Message)
+		return
+	case manifestCond == nil || manifestCond.Status != metav1.ConditionTrue:
+		// LCM upgrade still in progress; do nothing
 		return
 	}
 
@@ -132,4 +149,25 @@ func updateAppliedCondition(release *lifecyclev1alpha1.Release, phases []upgrade
 		setCondition(release, lifecyclev1alpha1.ConditionApplied, metav1.ConditionFalse,
 			lifecyclev1alpha1.UpgradeInProgress, fmt.Sprintf("Phase %s is in progress", inProgressPhase))
 	}
+}
+
+func skipRemainingPhases(release *lifecyclev1alpha1.Release, phases []upgrade.Phase) {
+	skipMessage := "Phase skipped as LCM upgrade failed"
+
+	manifestCond := apimeta.FindStatusCondition(release.Status.Conditions, lifecyclev1alpha1.ConditionManifestResolved)
+	if manifestCond != nil {
+		setCondition(release, lifecyclev1alpha1.ConditionManifestResolved, metav1.ConditionFalse,
+			lifecyclev1alpha1.UpgradeFailed, skipMessage)
+	}
+	// set all phases to Skipped
+	for _, phase := range phases {
+		if phase == upgrade.PhaseLCM {
+			continue
+		}
+		setCondition(release, phase.ConditionType(), metav1.ConditionTrue,
+			lifecyclev1alpha1.UpgradeSkipped, skipMessage)
+	}
+	// set Applied to Failed
+	setCondition(release, lifecyclev1alpha1.ConditionApplied, metav1.ConditionFalse,
+		lifecyclev1alpha1.UpgradeFailed, "Upgrade failed as LCM upgrade failed")
 }

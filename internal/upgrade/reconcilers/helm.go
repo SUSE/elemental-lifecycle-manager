@@ -65,13 +65,19 @@ type HelmReconciler struct {
 	releaseName string
 	// releaseVersion is the target release version
 	releaseVersion string
+	// strict defines if the reconciler should fail on upgrade of a chart
+	strict bool
+	// category is the Helm chart category ("Helm" or "LCM") used for logging purpose
+	category string
 }
 
 // NewHelmReconciler creates a new Helm reconciler.
-func NewHelmReconciler(c client.Client, h helm.Client) *HelmReconciler {
+func NewHelmReconciler(c client.Client, h helm.Client, strict bool, category string) *HelmReconciler {
 	return &HelmReconciler{
 		Client:     c,
 		helmClient: h,
+		strict:     strict,
+		category:   category,
 	}
 }
 
@@ -105,7 +111,7 @@ func (r *HelmReconciler) reconcileHelmCharts(ctx context.Context, releaseName, r
 		}, err
 	}
 
-	logger.Info("Reconciling Helm charts", "count", len(orderedChartConfigs))
+	logger.Info(fmt.Sprintf("Reconciling %s charts", r.category), "count", len(orderedChartConfigs))
 
 	var results []chartUpgradeResult
 	for _, chartConfig := range orderedChartConfigs {
@@ -127,6 +133,15 @@ func (r *HelmReconciler) reconcileHelmCharts(ctx context.Context, releaseName, r
 		if state == helm.ChartStateInProgress {
 			logger.Info("Chart upgrade in progress, waiting", "chart", chartName)
 			break
+		}
+
+		if state == helm.ChartStateFailed && r.strict {
+			// Failure in upgrading a chart should result in overall upgrade failure,
+			// and prevent moving forward to any other upgrade phase
+			return &upgrade.PhaseStatus{
+				State:   lifecyclev1alpha1.UpgradeFailed,
+				Message: fmt.Sprintf("Failed to upgrade %s chart %q", r.category, chartName),
+			}, fmt.Errorf("upgrading %s chart %q", r.category, chartName)
 		}
 	}
 
@@ -409,7 +424,7 @@ func (r *HelmReconciler) aggregateResults(results []chartUpgradeResult, totalCha
 	if len(results) == 0 {
 		return &upgrade.PhaseStatus{
 			State:   lifecyclev1alpha1.UpgradeSucceeded,
-			Message: "No Helm charts to reconcile",
+			Message: fmt.Sprintf("No %s charts to reconcile", r.category),
 		}
 	}
 
@@ -442,20 +457,20 @@ func (r *HelmReconciler) aggregateResults(results []chartUpgradeResult, totalCha
 	if inProgress > 0 {
 		return &upgrade.PhaseStatus{
 			State:   lifecyclev1alpha1.UpgradeInProgress,
-			Message: fmt.Sprintf("Helm charts in progress (%d/%d completed, %d skipped)", succeeded, totalCharts-skipped, skipped),
+			Message: fmt.Sprintf("%s charts in progress (%d/%d completed, %d skipped)", r.category, succeeded, totalCharts-skipped, skipped),
 		}
 	}
 
 	if succeeded == 0 && skipped == totalCharts {
 		return &upgrade.PhaseStatus{
 			State:   lifecyclev1alpha1.UpgradeSucceeded,
-			Message: "All Helm charts skipped (not installed on cluster)",
+			Message: fmt.Sprintf("All %s charts skipped (not installed on cluster)", r.category),
 		}
 	}
 
 	return &upgrade.PhaseStatus{
 		State:   lifecyclev1alpha1.UpgradeSucceeded,
-		Message: fmt.Sprintf("All %d Helm charts upgraded successfully (%d skipped)", succeeded, skipped),
+		Message: fmt.Sprintf("All %d %s charts upgraded successfully (%d skipped)", succeeded, r.category, skipped),
 	}
 }
 
