@@ -18,19 +18,11 @@ limitations under the License.
 package controller
 
 import (
-	"archive/tar"
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"runtime"
 	"time"
 
-	"github.com/google/go-containerregistry/pkg/authn"
-	"github.com/google/go-containerregistry/pkg/name"
-	"github.com/google/go-containerregistry/pkg/v1/mutate"
-	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/suse/elemental-lifecycle-manager/internal/helm"
 	"github.com/suse/elemental/v3/pkg/manifest/api"
 	"go.yaml.in/yaml/v3"
@@ -54,14 +46,11 @@ import (
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade/reconcilers"
 	"github.com/suse/elemental/v3/pkg/manifest/resolver"
 	corev1 "k8s.io/api/core/v1"
-
-	v1 "github.com/google/go-containerregistry/pkg/v1"
 )
 
 const requeueInterval = 30 * time.Second
 
 const (
-	manifestPath                      = "release_manifest.yaml"
 	upgradeManifestCacheConfigMapName = "upgrade-manifest-cache"
 )
 
@@ -346,7 +335,7 @@ func (r *ReleaseReconciler) getOrRetrieveUpgradeManifest(ctx context.Context, re
 	// Pull the container image in release.yaml
 	imageRef := fmt.Sprintf("%s:%s", release.Spec.Registry, release.Spec.Version)
 
-	manifestData, err := r.retrieveManifestFromURI(ctx, imageRef)
+	manifestData, err := releasecache.ReadManifest(ctx, imageRef)
 	if err != nil {
 		return "", err
 	}
@@ -363,7 +352,7 @@ func (r *ReleaseReconciler) getOrRetrieveUpgradeManifest(ctx context.Context, re
 
 	if solution.CorePlatform.Image != "" {
 		// we're working with a solution manifest; let's grab the core manifest for LCM charts
-		manifestData, err = r.retrieveManifestFromURI(ctx, solution.CorePlatform.Image)
+		manifestData, err = releasecache.ReadManifest(ctx, solution.CorePlatform.Image)
 		if err != nil {
 			return "", err
 		}
@@ -422,50 +411,6 @@ func (r *ReleaseReconciler) saveUpgradeManifestToCache(ctx context.Context, data
 	configMap.Data[version] = string(data)
 
 	return r.Update(ctx, configMap)
-}
-
-// retrieveManifestFromURI fetches image from the URI
-func (r *ReleaseReconciler) retrieveManifestFromURI(ctx context.Context, uri string) ([]byte, error) {
-	ref, err := name.ParseReference(uri)
-	if err != nil {
-		return []byte{}, fmt.Errorf("parsing image reference %s: %w", uri, err)
-	}
-
-	img, err := remote.Image(ref,
-		remote.WithAuthFromKeychain(authn.DefaultKeychain),
-		remote.WithTransport(http.DefaultTransport),
-		remote.WithPlatform(v1.Platform{OS: runtime.GOOS, Architecture: runtime.GOARCH}),
-		remote.WithContext(ctx),
-	)
-	if err != nil {
-		return []byte{}, fmt.Errorf("fetching remote image %s: %w", uri, err)
-	}
-
-	imageReadCloser := mutate.Extract(img)
-	defer func() {
-		_ = imageReadCloser.Close()
-	}()
-
-	tarReader := tar.NewReader(imageReadCloser)
-	var data []byte
-	var header *tar.Header
-	for {
-		header, err = tarReader.Next()
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return []byte{}, fmt.Errorf("manifest file not found in image at path: %s", manifestPath)
-			}
-			return []byte{}, fmt.Errorf("reading tar stream: %w", err)
-		}
-
-		if header.Name == manifestPath {
-			data, err = io.ReadAll(tarReader)
-			if err != nil {
-				return []byte{}, fmt.Errorf("reading manifest file contents: %w", err)
-			}
-			return data, nil
-		}
-	}
 }
 
 // updateReleaseStatus persists the specified release status using the latest Release resource state.
