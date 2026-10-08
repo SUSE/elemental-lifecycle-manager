@@ -34,6 +34,7 @@ import (
 
 	lifecyclev1alpha1 "github.com/suse/elemental-lifecycle-manager/api/v1alpha1"
 	"github.com/suse/elemental-lifecycle-manager/internal/helm"
+	releasecache "github.com/suse/elemental-lifecycle-manager/internal/release"
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade"
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade/reconcilers/testutil"
 	"github.com/suse/elemental/v3/pkg/manifest/api/core"
@@ -130,7 +131,7 @@ var _ = Describe("Release Controller", func() {
 
 		Context("When LCM upgrade fails", func() {
 			const lcmResourceName = "test-resource-lcm-failure"
-			const manifestCacheName = "upgrade-manifest-cache"
+			const manifestCacheName = "release-manifest-cache"
 			const elementalSystemNS = "elemental-system"
 
 			var lcmCtx context.Context
@@ -188,25 +189,9 @@ components:
 					Expect(k8sClient.Create(lcmCtx, lcmRelease)).To(Succeed())
 				}
 
-				By("seeding the upgrade manifest cache so lcmUpgradeConfig does not reach out to a registry")
-				cacheConfigMap := &corev1.ConfigMap{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      manifestCacheName,
-						Namespace: elementalSystemNS,
-					},
-					Data: map[string]string{
-						lcmRelease.Spec.Version: coreManifest,
-					},
-				}
-				existingConfigMap := &corev1.ConfigMap{}
-				cacheErr := k8sClient.Get(lcmCtx, types.NamespacedName{Name: manifestCacheName, Namespace: elementalSystemNS}, existingConfigMap)
-				if cacheErr != nil && errors.IsNotFound(cacheErr) {
-					Expect(k8sClient.Create(lcmCtx, cacheConfigMap)).To(Succeed())
-				} else {
-					Expect(cacheErr).NotTo(HaveOccurred())
-					existingConfigMap.Data = cacheConfigMap.Data
-					Expect(k8sClient.Update(lcmCtx, existingConfigMap)).To(Succeed())
-				}
+				By("seeding the raw manifest cache so lcmUpgradeConfig does not reach out to a registry")
+				cache := &releasecache.ManifestCache{Client: k8sClient}
+				Expect(cache.SetRaw(lcmCtx, elementalSystemNS, lcmRelease.Spec.Version, []byte(coreManifest))).To(Succeed())
 
 				By("wiring a Helm client that deterministically fails chart reconciliation")
 				mockHelmClient = testutil.NewMockHelmClient()

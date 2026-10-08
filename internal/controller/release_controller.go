@@ -27,7 +27,6 @@ import (
 	"github.com/suse/elemental/v3/pkg/manifest/api"
 	"go.yaml.in/yaml/v3"
 	"k8s.io/apimachinery/pkg/api/equality"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -49,10 +48,6 @@ import (
 )
 
 const requeueInterval = 30 * time.Second
-
-const (
-	upgradeManifestCacheConfigMapName = "upgrade-manifest-cache"
-)
 
 // ReleaseReconciler reconciles a Release object
 type ReleaseReconciler struct {
@@ -243,7 +238,7 @@ func (r *ReleaseReconciler) lcmUpgradeConfig(ctx context.Context, release *lifec
 		} `yaml:"components"`
 	}
 
-	err = yaml.Unmarshal([]byte(data), &core)
+	err = yaml.Unmarshal(data, &core)
 	if err != nil {
 		return &upgrade.Config{}, err
 	}
@@ -323,21 +318,24 @@ func (r *ReleaseReconciler) lcmUpgradeConfig(ctx context.Context, release *lifec
 	}, nil
 }
 
-// getOrRetrieveUpgradeManifest returns string containing the Core manifest from the Release used to trigger the upgrade.
-func (r *ReleaseReconciler) getOrRetrieveUpgradeManifest(ctx context.Context, release *lifecyclev1alpha1.Release) (string, error) {
-	data, err := r.getUpgradeManifestFromCache(ctx, release.Namespace, release.Spec.Version)
+// getOrRetrieveUpgradeManifest returns the raw Core manifest bytes for the Release used to trigger the upgrade.
+// The raw bytes are kept separate from the ResolvedManifest because the LCM phase must not depend on the
+// elemental manifest library's types.
+func (r *ReleaseReconciler) getOrRetrieveUpgradeManifest(ctx context.Context, release *lifecyclev1alpha1.Release) ([]byte, error) {
+	cache := &releasecache.ManifestCache{Client: r.Client}
+
+	data, err := cache.GetRaw(ctx, release.Namespace, release.Spec.Version)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	if data != "" {
+	if data != nil {
 		return data, nil
 	}
-	// Pull the container image in release.yaml
-	imageRef := fmt.Sprintf("%s:%s", release.Spec.Registry, release.Spec.Version)
 
+	imageRef := fmt.Sprintf("%s:%s", release.Spec.Registry, release.Spec.Version)
 	manifestData, err := releasecache.ReadManifest(ctx, imageRef)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	var solution struct {
@@ -345,72 +343,22 @@ func (r *ReleaseReconciler) getOrRetrieveUpgradeManifest(ctx context.Context, re
 			Image string `yaml:"image"`
 		} `yaml:"corePlatform"`
 	}
-	err = yaml.Unmarshal(manifestData, &solution)
-	if err != nil {
-		return "", err
+	if err = yaml.Unmarshal(manifestData, &solution); err != nil {
+		return nil, err
 	}
 
 	if solution.CorePlatform.Image != "" {
 		// we're working with a solution manifest; let's grab the core manifest for LCM charts
 		manifestData, err = releasecache.ReadManifest(ctx, solution.CorePlatform.Image)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 	}
-	// save the core manifest to a ConfigMap
-	err = r.saveUpgradeManifestToCache(ctx, manifestData, release.Namespace, release.Spec.Version)
-	if err != nil {
-		return "", fmt.Errorf("saving upgrade manifest ConfigMap: %w", err)
-	}
-	return string(manifestData), nil
-}
 
-// getUpgradeManifestFromCache fetches the Core manifest for a Release from a config map on the cluster
-func (r *ReleaseReconciler) getUpgradeManifestFromCache(ctx context.Context, namespace, version string) (string, error) {
-	configMap := &corev1.ConfigMap{}
-	err := r.Get(ctx, types.NamespacedName{
-		Name:      upgradeManifestCacheConfigMapName,
-		Namespace: namespace,
-	}, configMap)
-
-	if apierrors.IsNotFound(err) {
-		return "", nil
+	if err = cache.SetRaw(ctx, release.Namespace, release.Spec.Version, manifestData); err != nil {
+		return nil, fmt.Errorf("caching raw upgrade manifest: %w", err)
 	}
-	if err != nil {
-		return "", fmt.Errorf("getting upgrade manifest ConfigMap: %w", err)
-	}
-
-	return configMap.Data[version], nil
-}
-
-// saveUpgradeManifestToCache saves the Core manifest from the Release to a config map
-func (r *ReleaseReconciler) saveUpgradeManifestToCache(ctx context.Context, data []byte, namespace, version string) error {
-	configMap := &corev1.ConfigMap{}
-	err := r.Get(ctx, types.NamespacedName{
-		Name:      upgradeManifestCacheConfigMapName,
-		Namespace: namespace,
-	}, configMap)
-	if apierrors.IsNotFound(err) {
-		configMap = &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      upgradeManifestCacheConfigMapName,
-				Namespace: namespace,
-			},
-			Data: map[string]string{
-				version: string(data),
-			},
-		}
-		return r.Create(ctx, configMap)
-	}
-	if err != nil {
-		return fmt.Errorf("getting upgrade manifest ConfigMap: %w", err)
-	}
-	if configMap.Data == nil {
-		configMap.Data = make(map[string]string)
-	}
-	configMap.Data[version] = string(data)
-
-	return r.Update(ctx, configMap)
+	return manifestData, nil
 }
 
 // updateReleaseStatus persists the specified release status using the latest Release resource state.
