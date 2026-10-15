@@ -29,6 +29,7 @@ type Phase string
 
 // Phase constants derived from condition types.
 var (
+	PhaseLCM        = Phase(strings.TrimSuffix(lifecyclev1alpha1.ConditionLCMUpgraded, "Upgraded"))
 	PhaseOS         = Phase(strings.TrimSuffix(lifecyclev1alpha1.ConditionOSUpgraded, "Upgraded"))
 	PhaseKubernetes = Phase(strings.TrimSuffix(lifecyclev1alpha1.ConditionKubernetesUpgraded, "Upgraded"))
 	PhaseHelmCharts = Phase(strings.TrimSuffix(lifecyclev1alpha1.ConditionHelmChartsUpgraded, "Upgraded"))
@@ -76,6 +77,14 @@ func (r *Result) AllComplete() bool {
 		if state.State != lifecyclev1alpha1.UpgradeSucceeded && state.State != lifecyclev1alpha1.UpgradeSkipped {
 			return false
 		}
+	}
+	return true
+}
+
+func (r *Result) IsPhaseComplete(phase Phase) bool {
+	state := r.PhaseStates[phase].State
+	if state != lifecyclev1alpha1.UpgradeSucceeded && state != lifecyclev1alpha1.UpgradeSkipped {
+		return false
 	}
 	return true
 }

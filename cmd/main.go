@@ -205,6 +205,7 @@ func main() {
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
 		RetrieveManifest: release.RetrieveManifest,
+		HelmClient:       helmClient,
 		Pipeline: upgrade.NewPipeline(
 			reconcilers.NewOSReconciler(k8sClient, sucPlanReconciler),
 			reconcilers.NewKubernetesReconciler(
@@ -212,7 +213,7 @@ func main() {
 				sucPlanReconciler,
 				packagedComponentsHandler,
 			),
-			reconcilers.NewHelmReconciler(k8sClient, helmClient),
+			reconcilers.NewHelmReconciler(k8sClient, helmClient, false, "Helm"),
 		),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Release")

@@ -31,9 +31,16 @@ import (
 	"github.com/suse/elemental/v3/pkg/manifest/resolver"
 )
 
-const manifestCacheConfigMapName = "release-manifest-cache"
+const (
+	manifestCacheConfigMapName = "release-manifest-cache"
+	// rawManifestKeySuffix distinguishes the raw core manifest entry from the resolved
+	// manifest entry, which is stored under the bare release version.
+	rawManifestKeySuffix = ".raw.yaml"
+)
 
 // ManifestCache provides ConfigMap-based caching for release manifests.
+// For each release version it can hold two independent entries: the ResolvedManifest
+// and the raw core manifest bytes.
 type ManifestCache struct {
 	client.Client
 }
@@ -41,22 +48,9 @@ type ManifestCache struct {
 // Get retrieves a cached manifest for the given release version.
 // Returns nil if not found in cache.
 func (c *ManifestCache) Get(ctx context.Context, namespace, version string) (*resolver.ResolvedManifest, error) {
-	configMap := &corev1.ConfigMap{}
-	err := c.Client.Get(ctx, types.NamespacedName{
-		Name:      manifestCacheConfigMapName,
-		Namespace: namespace,
-	}, configMap)
-
-	if apierrors.IsNotFound(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("getting manifest cache ConfigMap: %w", err)
-	}
-
-	data, found := configMap.Data[version]
-	if !found {
-		return nil, nil
+	data, found, err := c.get(ctx, namespace, version)
+	if err != nil || !found {
+		return nil, err
 	}
 
 	manifest := &resolver.ResolvedManifest{}
@@ -74,8 +68,48 @@ func (c *ManifestCache) Set(ctx context.Context, namespace, version string, mani
 		return fmt.Errorf("marshaling manifest: %w", err)
 	}
 
+	return c.set(ctx, namespace, version, string(data))
+}
+
+// GetRaw retrieves the cached raw core manifest bytes for the given release version.
+// Returns nil if not found in cache.
+func (c *ManifestCache) GetRaw(ctx context.Context, namespace, version string) ([]byte, error) {
+	data, found, err := c.get(ctx, namespace, version+rawManifestKeySuffix)
+	if err != nil || !found {
+		return nil, err
+	}
+
+	return []byte(data), nil
+}
+
+// SetRaw stores the raw core manifest bytes in the cache for the given release version.
+func (c *ManifestCache) SetRaw(ctx context.Context, namespace, version string, data []byte) error {
+	return c.set(ctx, namespace, version+rawManifestKeySuffix, string(data))
+}
+
+// get returns the value stored under key, and whether it was present.
+func (c *ManifestCache) get(ctx context.Context, namespace, key string) (string, bool, error) {
 	configMap := &corev1.ConfigMap{}
-	err = c.Client.Get(ctx, types.NamespacedName{
+	err := c.Client.Get(ctx, types.NamespacedName{
+		Name:      manifestCacheConfigMapName,
+		Namespace: namespace,
+	}, configMap)
+
+	if apierrors.IsNotFound(err) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("getting manifest cache ConfigMap: %w", err)
+	}
+
+	value, found := configMap.Data[key]
+	return value, found, nil
+}
+
+// set stores value under key, creating the ConfigMap if needed and leaving other keys untouched.
+func (c *ManifestCache) set(ctx context.Context, namespace, key, value string) error {
+	configMap := &corev1.ConfigMap{}
+	err := c.Client.Get(ctx, types.NamespacedName{
 		Name:      manifestCacheConfigMapName,
 		Namespace: namespace,
 	}, configMap)
@@ -87,20 +121,20 @@ func (c *ManifestCache) Set(ctx context.Context, namespace, version string, mani
 				Namespace: namespace,
 			},
 			Data: map[string]string{
-				version: string(data),
+				key: value,
 			},
 		}
 		return c.Create(ctx, configMap)
 	}
 
 	if err != nil {
-		return fmt.Errorf("getting ConfigMap: %w", err)
+		return fmt.Errorf("getting manifest cache ConfigMap: %w", err)
 	}
 
 	if configMap.Data == nil {
 		configMap.Data = make(map[string]string)
 	}
-	configMap.Data[version] = string(data)
+	configMap.Data[key] = value
 
 	return c.Update(ctx, configMap)
 }
