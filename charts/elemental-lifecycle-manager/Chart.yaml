@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-#!BuildTag: elemental/charts/elemental-lifecycle-manager:0.1.1
+#!BuildTag: elemental/charts/elemental-lifecycle-manager:0.1.2
 
 apiVersion: v2
 name: elemental-lifecycle-manager
 description: A Helm chart for the Elemental Lifecycle Manager
 type: application
-version: 0.1.1
-appVersion: "0.1.1"
+version: 0.1.2
+appVersion: "0.1.2"
