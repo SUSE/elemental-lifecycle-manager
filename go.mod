@@ -3,7 +3,7 @@ module github.com/suse/elemental-lifecycle-manager
 go 1.26.7
 
 require (
-	github.com/google/go-containerregistry v0.22.0
+	github.com/google/go-containerregistry v0.22.1
 	github.com/k3s-io/helm-controller v0.17.9
 	github.com/onsi/ginkgo/v2 v2.33.1
 	github.com/onsi/gomega v1.44.0
