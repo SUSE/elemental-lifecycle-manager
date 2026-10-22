@@ -40,10 +40,14 @@ type sourceReader struct {
 	ctx context.Context
 }
 
+// Read is a wrapper over ReadURI and uses the ReleaseManifestSource's URI to fetch the image.
 func (s sourceReader) Read(m *source.ReleaseManifestSource) ([]byte, error) {
-	const manifestPath = "release_manifest.yaml"
+	return s.ReadURI(m.URI())
+}
 
-	imageRef := m.URI()
+// ReadURI fetches the OCI image at imageRef and returns the contents of its release manifest file.
+func (s sourceReader) ReadURI(imageRef string) ([]byte, error) {
+	const manifestPath = "release_manifest.yaml"
 
 	ref, err := name.ParseReference(imageRef)
 	if err != nil {
@@ -83,6 +87,11 @@ func (s sourceReader) Read(m *source.ReleaseManifestSource) ([]byte, error) {
 			return manifestData, nil
 		}
 	}
+}
+
+// ReadManifest fetches the OCI image at imageRef and returns the raw contents of its release manifest file.
+func ReadManifest(ctx context.Context, imageRef string) ([]byte, error) {
+	return sourceReader{ctx: ctx}.ReadURI(imageRef)
 }
 
 func RetrieveManifest(ctx context.Context, registry, version string) (*resolver.ResolvedManifest, error) {

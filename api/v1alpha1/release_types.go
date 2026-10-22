@@ -39,6 +39,9 @@ const (
 	ConditionApplied = "Applied"
 	// ConditionManifestResolved indicates whether the release manifest was successfully retrieved.
 	ConditionManifestResolved = "ManifestResolved"
+	// ConditionLCMUpgraded indicates the states of LCM upgrade.
+	// Pending -> InProgress -> Succeeded/Failed
+	ConditionLCMUpgraded = "LCMUpgraded"
 	// ConditionOSUpgraded indicates the status of the OS upgrade.
 	// Pending -> InProgress -> Succeeded/Failed
 	ConditionOSUpgraded = "OSUpgraded"
