@@ -34,6 +34,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/suse/elemental/v3/pkg/manifest/resolver"
 	"github.com/suse/elemental/v3/pkg/manifest/source"
+	"go.yaml.in/yaml/v3"
 )
 
 type sourceReader struct {
@@ -89,9 +90,37 @@ func (s sourceReader) ReadURI(imageRef string) ([]byte, error) {
 	}
 }
 
-// ReadManifest fetches the OCI image at imageRef and returns the raw contents of its release manifest file.
-func ReadManifest(ctx context.Context, imageRef string) ([]byte, error) {
-	return sourceReader{ctx: ctx}.ReadURI(imageRef)
+// ReadRawCoreManifest reads the image at imageRef and returns the raw core platform manifest.
+// If imageRef refers to a solution release, the core platform manifest referenced by its corePlatform.image is read.
+func ReadRawCoreManifest(ctx context.Context, imageRef string) ([]byte, error) {
+	read := sourceReader{ctx: ctx}.ReadURI
+
+	manifest, err := read(imageRef)
+	if err != nil {
+		return nil, err
+	}
+
+	var header struct {
+		CorePlatform struct {
+			Image string `yaml:"image"`
+		} `yaml:"corePlatform"`
+	}
+
+	if err = yaml.Unmarshal(manifest, &header); err != nil {
+		return nil, fmt.Errorf("parsing release manifest %s: %w", imageRef, err)
+	}
+
+	coreRef := header.CorePlatform.Image
+	if coreRef == "" {
+		return manifest, nil
+	}
+
+	core, err := read(coreRef)
+	if err != nil {
+		return nil, fmt.Errorf("reading core platform manifest %s: %w", coreRef, err)
+	}
+
+	return core, nil
 }
 
 func RetrieveManifest(ctx context.Context, registry, version string) (*resolver.ResolvedManifest, error) {
