@@ -41,7 +41,6 @@ import (
 	lifecyclev1alpha1 "github.com/suse/elemental-lifecycle-manager/api/v1alpha1"
 	"github.com/suse/elemental-lifecycle-manager/internal/helm"
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade"
-	"github.com/suse/elemental/v3/pkg/manifest/api"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 )
 
@@ -100,18 +99,10 @@ func (r *HelmReconciler) reconcileHelmCharts(ctx context.Context, releaseName, r
 	r.releaseName = releaseName
 	r.releaseVersion = releaseVersion
 
-	orderedChartConfigs, err := sortChartConfigsByDependencies(chartConfigs)
-	if err != nil {
-		return &upgrade.PhaseStatus{
-			State:   lifecyclev1alpha1.UpgradeFailed,
-			Message: fmt.Sprintf("Failed to resolve chart dependencies: %v", err),
-		}, err
-	}
-
-	logger.Info("Reconciling Helm charts", "count", len(orderedChartConfigs))
+	logger.Info("Reconciling Helm charts", "count", len(chartConfigs))
 
 	var results []chartUpgradeResult
-	for _, chartConfig := range orderedChartConfigs {
+	for _, chartConfig := range chartConfigs {
 		chartName := chartConfig.Chart.GetName()
 		state, err := r.reconcileChart(ctx, chartConfig)
 		if err != nil {
@@ -142,61 +133,7 @@ func (r *HelmReconciler) reconcileHelmCharts(ctx context.Context, releaseName, r
 		}
 	}
 
-	return r.aggregateResults(results, len(orderedChartConfigs)), nil
-}
-
-// sortChartConfigsByDependencies returns a sorted slice of chart configurations,
-// where configuration for chart dependencies come before their respective dependent chart configurations.
-func sortChartConfigsByDependencies(chartConfigs []*upgrade.HelmChartConfig) ([]*upgrade.HelmChartConfig, error) {
-	chartConfigMap := make(map[string]*upgrade.HelmChartConfig)
-	for _, chartConfig := range chartConfigs {
-		chartConfigMap[chartConfig.Chart.GetName()] = chartConfig
-	}
-
-	// Track visited and in-progress for cycle detection
-	visited, inProgress := make(map[string]bool), make(map[string]bool)
-	var result []*upgrade.HelmChartConfig
-
-	var visit func(name string) error
-	visit = func(name string) error {
-		if inProgress[name] {
-			return fmt.Errorf("circular dependency detected involving chart %s", name)
-		}
-		if visited[name] {
-			return nil
-		}
-
-		chartConfig, exists := chartConfigMap[name]
-		if !exists {
-			// Chart not in our list, skip (it might be an external dependency)
-			return nil
-		}
-
-		inProgress[name] = true
-
-		// Visit dependencies first
-		for _, dep := range chartConfig.Chart.DependsOn {
-			if dep.Type == api.DependencyTypeHelm {
-				if err := visit(dep.Name); err != nil {
-					return err
-				}
-			}
-		}
-
-		inProgress[name] = false
-		visited[name] = true
-		result = append(result, chartConfig)
-
-		return nil
-	}
-
-	for _, chartConfig := range chartConfigs {
-		if err := visit(chartConfig.Chart.GetName()); err != nil {
-			return nil, err
-		}
-	}
-
-	return result, nil
+	return r.aggregateResults(results, len(chartConfigs)), nil
 }
 
 // reconcileChart reconciles a single chart and returns its state.

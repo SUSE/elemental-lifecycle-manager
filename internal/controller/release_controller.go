@@ -136,17 +136,14 @@ func (r *ReleaseReconciler) reconcileNormal(ctx context.Context, release *lifecy
 	if !apimeta.IsStatusConditionTrue(release.Status.Conditions, upgrade.PhaseLCM.ConditionType()) {
 		config, err := r.lcmUpgradeConfig(ctx, release)
 		if err != nil {
-			if runtimeConfigErr, ok := errors.AsType[upgrade.RuntimeConfigError](err); ok {
-				// Use info-level logging rather than returning the error. Since the error is related to
-				// user misconfiguration, this ensures that the controller does not needlessly requeue
-				// until the user fixes the underlying configuration issue.
-				logger.Info("Invalid component configuration in Release resource", "error", runtimeConfigErr.Error())
+			if configErr, ok := errors.AsType[upgrade.ConfigError](err); ok {
+				logger.Info("Invalid upgrade configuration", "error", configErr.Error())
 
 				setCondition(release, lifecyclev1alpha1.ConditionApplied, metav1.ConditionFalse,
-					lifecyclev1alpha1.UpgradeFailed, runtimeConfigErr.Error())
+					lifecyclev1alpha1.UpgradeFailed, configErr.Error())
 				return ctrl.Result{}, nil
 			}
-			return ctrl.Result{}, fmt.Errorf("parsing upgrade config for LCM upgrade: %w", err)
+			return ctrl.Result{}, fmt.Errorf("parsing self-upgrade config: %w", err)
 		}
 
 		status, err := r.reconcileLCM(ctx, config)
@@ -173,14 +170,11 @@ func (r *ReleaseReconciler) reconcileNormal(ctx context.Context, release *lifecy
 
 	config, err := r.parseUpgradeConfig(ctx, manifest, release)
 	if err != nil {
-		if runtimeConfigErr, ok := errors.AsType[upgrade.RuntimeConfigError](err); ok {
-			// Use info-level logging rather than returning the error. Since the error is related to
-			// user misconfiguration, this ensures that the controller does not needlessly requeue
-			// until the user fixes the underlying configuration issue.
-			logger.Info("Invalid component configuration in Release resource", "error", runtimeConfigErr.Error())
+		if configErr, ok := errors.AsType[upgrade.ConfigError](err); ok {
+			logger.Info("Invalid upgrade configuration", "error", configErr.Error())
 
 			setCondition(release, lifecyclev1alpha1.ConditionApplied, metav1.ConditionFalse,
-				lifecyclev1alpha1.UpgradeFailed, runtimeConfigErr.Error())
+				lifecyclev1alpha1.UpgradeFailed, configErr.Error())
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, fmt.Errorf("parsing upgrade config: %w", err)
@@ -211,7 +205,7 @@ func (r *ReleaseReconciler) reconcileNormal(ctx context.Context, release *lifecy
 }
 
 func (r *ReleaseReconciler) reconcileLCM(ctx context.Context, config *upgrade.Config) (*upgrade.PhaseStatus, error) {
-	lcmReconciler := reconcilers.NewHelmReconciler(r.Client, r.HelmClient, true)
+	lcmReconciler := reconcilers.NewLCMHelmReconciler(r.Client, r.HelmClient)
 	status, err := lcmReconciler.Reconcile(ctx, config)
 	if err != nil {
 		return &upgrade.PhaseStatus{},
@@ -279,50 +273,29 @@ func (r *ReleaseReconciler) lcmUpgradeConfig(ctx context.Context, release *lifec
 		} `yaml:"components"`
 	}
 
-	err = yaml.Unmarshal(data, &core)
-	if err != nil {
-		return &upgrade.Config{}, err
+	if err := yaml.Unmarshal(data, &core); err != nil {
+		return nil, err
 	}
 
-	runtimeCharts := runtimeHelmChartConfigs(release, elementalLifecycleManager)
-
-	var charts []*api.HelmChart
-	for _, chart := range core.Components.Helm.Charts {
-		if chart.Chart == elementalLifecycleManager || chart.Chart == elementalLifecycleManagerCRDs {
-			c := api.HelmChart{
-				Chart:      chart.Chart,
-				Repository: chart.Repository,
-				Version:    chart.Version,
-				Values:     chart.Values,
-			}
-			charts = append(charts, &c)
+	var lcmHelm api.Helm
+	for _, c := range core.Components.Helm.Charts {
+		if c.Chart == elementalLifecycleManager || c.Chart == elementalLifecycleManagerCRDs {
+			lcmHelm.Charts = append(lcmHelm.Charts, &api.HelmChart{
+				Chart: c.Chart, Repository: c.Repository, Version: c.Version, Values: c.Values,
+			})
 		}
 	}
-	var repositories []*api.HelmRepository
+
 	for _, repo := range core.Components.Helm.Repositories {
-		r := api.HelmRepository{
-			Name: repo.Name,
-			URL:  repo.URL,
-		}
-		repositories = append(repositories, &r)
-	}
-	// Create a Helm Reconciler for LCM charts
-	// Create a upgrade.Config from the values we have available
-	// Hand over to Helm Reconciler created for LCM charts
-	helmCharts := api.Helm{
-		Charts:       charts,
-		Repositories: repositories,
-	}
-	helmChartConfig, err := upgrade.BuildHelmChartConfig(&helmCharts, nil, runtimeCharts)
-	if err != nil {
-		return &upgrade.Config{}, err
+		lcmHelm.Repositories = append(lcmHelm.Repositories, &api.HelmRepository{Name: repo.Name, URL: repo.URL})
 	}
 
-	return &upgrade.Config{
-		ReleaseNamespacedName: types.NamespacedName{Name: release.Name, Namespace: release.Namespace},
-		ReleaseVersion:        release.Spec.Version,
-		HelmCharts:            helmChartConfig,
-	}, nil
+	return upgrade.NewSelfUpgradeConfig(
+		types.NamespacedName{Name: release.Name, Namespace: release.Namespace},
+		release.Spec.Version,
+		&lcmHelm,
+		runtimeHelmChartConfigs(release, elementalLifecycleManager),
+	)
 }
 
 // getOrRetrieveUpgradeManifest returns the raw Core manifest bytes for the Release used to trigger the upgrade.
@@ -439,17 +412,10 @@ func (r *ReleaseReconciler) parseUpgradeConfig(ctx context.Context, manifest *re
 		return nil, fmt.Errorf("parsing drain options: %w", err)
 	}
 
-	runtimeConfig := &upgrade.RuntimeConfig{DrainOpts: opts, HelmCharts: runtimeHelmChartConfigs(release)}
-
-	config, err = upgrade.NewConfig(manifest, release.Spec.Version, types.NamespacedName{Name: release.Name, Namespace: release.Namespace}, runtimeConfig)
-	if err != nil {
-		return nil, err
-	}
-	// remove LCM related charts from config because they should be updated by self-upgrade phase
-	config.HelmCharts = slices.DeleteFunc(config.HelmCharts, func(c *upgrade.HelmChartConfig) bool {
-		return slices.Contains([]string{elementalLifecycleManager, elementalLifecycleManagerCRDs}, c.Chart.Chart)
-	})
-	return config, nil
+	return upgrade.NewConfig(manifest,
+		release.Spec.Version,
+		types.NamespacedName{Name: release.Name, Namespace: release.Namespace},
+		&upgrade.RuntimeConfig{DrainOpts: opts, HelmCharts: runtimeHelmChartConfigs(release)})
 }
 
 // cleanupOldVersionPlans deletes SUC Plans from a previous version.

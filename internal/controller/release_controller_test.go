@@ -36,6 +36,7 @@ import (
 	"github.com/suse/elemental-lifecycle-manager/internal/helm"
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade"
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade/reconcilers/testutil"
+	"github.com/suse/elemental/v3/pkg/manifest/api"
 	"github.com/suse/elemental/v3/pkg/manifest/api/core"
 	"github.com/suse/elemental/v3/pkg/manifest/resolver"
 )
@@ -355,6 +356,47 @@ components:
 				} {
 					Expect(apimeta.IsStatusConditionTrue(updated.Status.Conditions, conditionType)).To(BeTrue(), "condition %q", conditionType)
 				}
+			})
+
+			It("should report a failed condition without running the pipeline when the release charts contain a dependency cycle", func() {
+				helmDependency := func(name string) []api.HelmChartDependency {
+					return []api.HelmChartDependency{{Name: name, Type: api.DependencyTypeHelm}}
+				}
+
+				reconciler := &ReleaseReconciler{
+					Client: k8sClient,
+					Scheme: k8sClient.Scheme(),
+					RetrieveManifest: func(context.Context, string, string) (*resolver.ResolvedManifest, error) {
+						return &resolver.ResolvedManifest{
+							CorePlatform: &core.ReleaseManifest{
+								Components: core.Components{
+									OperatingSystem: &core.OperatingSystem{Image: core.Image{Base: "registry.example.com/os:1.0.0"}},
+									Kubernetes:      &core.Kubernetes{Version: "v1.33.0", Image: "registry.example.com/k8s"},
+									Helm: &api.Helm{
+										Charts: []*api.HelmChart{
+											{Chart: "foo", DependsOn: helmDependency("bar")},
+											{Chart: "bar", DependsOn: helmDependency("foo")},
+										},
+									},
+								},
+							},
+						}, nil
+					},
+					// The stub fails if the pipeline runs, which it must not.
+					Pipeline:   upgrade.NewPipeline(stubPhaseHandler{phase: upgrade.PhaseOS}),
+					HelmClient: testutil.NewMockHelmClient(),
+				}
+
+				_, err := reconciler.Reconcile(doneCtx, reconcile.Request{NamespacedName: doneNN})
+				Expect(err).NotTo(HaveOccurred())
+
+				updated := &lifecyclev1alpha1.Release{}
+				Expect(k8sClient.Get(doneCtx, doneNN, updated)).To(Succeed())
+				applied := apimeta.FindStatusCondition(updated.Status.Conditions, lifecyclev1alpha1.ConditionApplied)
+				Expect(applied).NotTo(BeNil())
+				Expect(applied.Status).To(Equal(metav1.ConditionFalse))
+				Expect(applied.Reason).To(Equal(lifecyclev1alpha1.UpgradeFailed))
+				Expect(applied.Message).To(ContainSubstring("circular dependency detected involving chart foo"))
 			})
 		})
 	})
