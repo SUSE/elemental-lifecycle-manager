@@ -207,13 +207,14 @@ func main() {
 		RetrieveManifest: release.RetrieveManifest,
 		HelmClient:       helmClient,
 		Pipeline: upgrade.NewPipeline(
+			reconcilers.NewPriorityHelmReconciler(k8sClient, helmClient),
 			reconcilers.NewOSReconciler(k8sClient, sucPlanReconciler),
 			reconcilers.NewKubernetesReconciler(
 				k8sClient,
 				sucPlanReconciler,
 				packagedComponentsHandler,
 			),
-			reconcilers.NewHelmReconciler(k8sClient, helmClient, false),
+			reconcilers.NewStandardHelmReconciler(k8sClient, helmClient),
 		),
 		RawManifests: make(map[string][]byte),
 	}).SetupWithManager(mgr); err != nil {

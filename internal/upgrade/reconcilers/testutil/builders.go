@@ -74,40 +74,24 @@ func WithKubernetes(image, version string) ConfigOpts {
 	}
 }
 
-func WithHelmChartConfig(chartConfigs []*upgrade.HelmChartConfig) ConfigOpts {
+// WithHelmCharts sets the charts upgraded in the given phase. The charts are upgraded in the given order.
+func WithHelmCharts(phase upgrade.Phase, charts []*upgrade.HelmChartConfig) ConfigOpts {
 	return func(c *upgrade.Config) {
-		c.HelmCharts = chartConfigs
-	}
-}
-
-type HelmChartOpts func(h *api.HelmChart)
-
-func WithDependencies(dependencies []api.HelmChartDependency) HelmChartOpts {
-	return func(h *api.HelmChart) {
-		h.DependsOn = make([]api.HelmChartDependency, len(dependencies))
-		for i, dep := range dependencies {
-			h.DependsOn[i] = api.HelmChartDependency{
-				Name: dep.Name,
-				Type: dep.Type,
-			}
+		if c.HelmCharts == nil {
+			c.HelmCharts = make(map[upgrade.Phase][]*upgrade.HelmChartConfig)
 		}
+		c.HelmCharts[phase] = charts
 	}
 }
 
 // NewTestHelmChart creates a test api.HelmChart.
-func NewTestHelmChart(name, version string, opts ...HelmChartOpts) *api.HelmChart {
-	chart := &api.HelmChart{
+func NewTestHelmChart(name, version string) *api.HelmChart {
+	return &api.HelmChart{
 		Name:    name,
 		Chart:   name,
 		Version: version,
 		Values:  map[string]any{},
 	}
-
-	for _, opt := range opts {
-		opt(chart)
-	}
-
-	return chart
 }
 
 type NodeOpts func(node *corev1.Node)
