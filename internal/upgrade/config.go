@@ -40,8 +40,12 @@ type Config struct {
 	OS *OSConfig
 	// Kubernetes contains all upgrade configurations related to the target Kubernetes distribution.
 	Kubernetes *KubernetesConfig
-	// HelmCharts contains all target Helm charts that need to be upgraded.
-	HelmCharts []*HelmChartConfig
+	// HelmCharts map each Helm upgrade phase to the charts that need to be upgraded as part of it, in dependency order.
+	// Supported phases:
+	//   - PhaseLCM: the Elemental Lifecycle Manager charts, upgraded during the self-upgrade phase.
+	//   - PhasePriorityHelmCharts: charts that need to be upgraded before the standard 'OS -> K8s -> Helm' upgrade workflow.
+	//   - PhaseHelmCharts: charts that need to be upgraded as part of the standard 'OS -> K8s -> Helm' upgrade workflow.
+	HelmCharts map[Phase][]*HelmChartConfig
 }
 
 // OSConfig contains configurations related to a specific operating system upgrade.
@@ -88,10 +92,11 @@ type RuntimeConfig struct {
 	HelmCharts map[string]RuntimeHelmChartConfig
 }
 
-// RuntimeConfigError specifies an error caused due to invalid runtime configuration.
-type RuntimeConfigError string
+// ConfigError specifies an error caused by invalid upgrade configuration coming either from runtime
+// or release manifest configurations.
+type ConfigError string
 
-func (c RuntimeConfigError) Error() string { return string(c) }
+func (c ConfigError) Error() string { return string(c) }
 
 type RuntimeHelmChartConfig struct {
 	// PriorityUpgrade specifies the upgrade priority of the chart.
@@ -150,17 +155,47 @@ func NewConfig(manifest *resolver.ResolvedManifest, releaseVersion string, relea
 		solutionCharts = manifest.SolutionExtension.Components.Helm
 	}
 
-	charts, err := BuildHelmChartConfig(core.Components.Helm, solutionCharts, runtimeConfig.HelmCharts)
+	config.HelmCharts, err = parseHelmCharts(core.Components.Helm, solutionCharts, runtimeConfig.HelmCharts)
+	if err != nil {
+		return nil, err
+	}
+
+	return config, nil
+}
+
+// NewSelfUpgradeConfig returns a trimmed upgrade config targeted specifically for the Elemental Lifecycle Manager's
+// self-upgrade workflow.
+func NewSelfUpgradeConfig(releaseNN types.NamespacedName, releaseVersion string, charts *api.Helm,
+	runtimeCharts map[string]RuntimeHelmChartConfig) (*Config, error) {
+	grouped, err := parseHelmCharts(charts, nil, runtimeCharts)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Config{
+		ReleaseNamespacedName: releaseNN,
+		ReleaseVersion:        releaseVersion,
+		HelmCharts:            map[Phase][]*HelmChartConfig{PhaseLCM: grouped[PhaseLCM]},
+	}, nil
+}
+
+// parseHelmCharts merges the core and solution charts with the runtime overrides, and groups them by upgrade phase.
+func parseHelmCharts(core, solution *api.Helm, runtimeCharts map[string]RuntimeHelmChartConfig) (map[Phase][]*HelmChartConfig, error) {
+	charts, err := buildHelmChartConfig(core, solution, runtimeCharts)
 	if err != nil {
 		return nil, fmt.Errorf("parsing helm chart configuration: %w", err)
 	}
 
-	config.HelmCharts = charts
-	return config, nil
+	grouped, err := groupHelmChartsByPhase(charts)
+	if err != nil {
+		return nil, fmt.Errorf("grouping helm charts by phase: %w", err)
+	}
+
+	return grouped, nil
 }
 
-// BuildHelmChartConfig merges Helm configurations from the core and solution manifests with any runtime-defined overrides.
-func BuildHelmChartConfig(core, solution *api.Helm, runtimeConfigs map[string]RuntimeHelmChartConfig) ([]*HelmChartConfig, error) {
+// buildHelmChartConfig merges Helm configurations from the core and solution manifests with any runtime-defined overrides.
+func buildHelmChartConfig(core, solution *api.Helm, runtimeConfigs map[string]RuntimeHelmChartConfig) ([]*HelmChartConfig, error) {
 	chartConfig := []*HelmChartConfig{}
 	unprocessedRuntimeCharts := make(map[string]struct{}, len(runtimeConfigs))
 	for chart := range runtimeConfigs {
@@ -215,7 +250,7 @@ func BuildHelmChartConfig(core, solution *api.Helm, runtimeConfigs map[string]Ru
 	if len(unprocessedRuntimeCharts) > 0 {
 		// sort unknown slice to prevent status churn
 		unknown := slices.Sorted(maps.Keys(unprocessedRuntimeCharts))
-		return nil, RuntimeConfigError("Unknown chart references: " + strings.Join(unknown, ", "))
+		return nil, ConfigError("Unknown chart references: " + strings.Join(unknown, ", "))
 	}
 
 	if len(chartConfig) == 0 {
@@ -223,4 +258,111 @@ func BuildHelmChartConfig(core, solution *api.Helm, runtimeConfigs map[string]Ru
 	}
 
 	return chartConfig, nil
+}
+
+// groupHelmChartsByPhase groups the given charts by the phase in which they are upgraded. Returns an error if a
+// dependency cycle is detected, or nil if no charts are specified.
+func groupHelmChartsByPhase(charts []*HelmChartConfig) (map[Phase][]*HelmChartConfig, error) {
+	if len(charts) == 0 {
+		return nil, nil
+	}
+
+	lcm, err := filterWithDependencies(charts, isLCMChart)
+	if err != nil {
+		return nil, fmt.Errorf("filtering LCM charts: %w", err)
+	}
+
+	priority, err := filterWithDependencies(charts, isPriorityChart)
+	if err != nil {
+		return nil, fmt.Errorf("filtering priority charts: %w", err)
+	}
+
+	standard, err := filterWithDependencies(charts, func(c *HelmChartConfig) bool { return !isPriorityChart(c) })
+	if err != nil {
+		return nil, fmt.Errorf("filtering standard charts: %w", err)
+	}
+
+	lcm = slices.DeleteFunc(lcm, func(c *HelmChartConfig) bool { return !isLCMChart(c) })
+
+	// The LCM chart is handled by the special self-upgrade workflow, so it should not be
+	// part of neither the priority nor standard upgrade phases.
+	priority = slices.DeleteFunc(priority, isLCMChart)
+
+	// Charts in the priority phase are already upgraded when the standard phase runs, so
+	// make sure they are not needlessly added in the standard phase as well.
+	inPriority := make(map[string]bool, len(priority))
+	for _, c := range priority {
+		inPriority[c.Chart.GetName()] = true
+	}
+
+	standard = slices.DeleteFunc(standard, func(c *HelmChartConfig) bool {
+		return isLCMChart(c) || inPriority[c.Chart.GetName()]
+	})
+
+	return map[Phase][]*HelmChartConfig{
+		PhaseLCM:                lcm,
+		PhasePriorityHelmCharts: priority,
+		PhaseHelmCharts:         standard,
+	}, nil
+}
+
+func isLCMChart(h *HelmChartConfig) bool {
+	return h.Chart.Chart == "elemental-lifecycle-manager" || h.Chart.Chart == "elemental-lifecycle-manager-crds"
+}
+
+func isPriorityChart(c *HelmChartConfig) bool {
+	if c.RuntimeConfig.PriorityUpgrade != nil {
+		return *c.RuntimeConfig.PriorityUpgrade
+	}
+	return c.Chart.PriorityUpgrade
+}
+
+// filterWithDependencies returns the charts selected by 'choose', together with their dependencies.
+// The returned charts are ordered with dependencies always coming before their dependent charts.
+// Returns an error on circular chart dependencies.
+func filterWithDependencies(charts []*HelmChartConfig, choose func(*HelmChartConfig) bool) ([]*HelmChartConfig, error) {
+	chartMap := make(map[string]*HelmChartConfig, len(charts))
+	for _, c := range charts {
+		chartMap[c.Chart.GetName()] = c
+	}
+
+	var ordered []*HelmChartConfig
+	visited, inProgress := make(map[string]bool), make(map[string]bool)
+
+	var visit func(c *HelmChartConfig) error
+	visit = func(c *HelmChartConfig) error {
+		name := c.Chart.GetName()
+		if visited[name] {
+			return nil
+		}
+		if inProgress[name] {
+			return ConfigError("circular dependency detected involving chart " + name)
+		}
+
+		inProgress[name] = true
+		for _, dep := range c.Chart.DependsOn {
+			if d, ok := chartMap[dep.Name]; ok && dep.Type == api.DependencyTypeHelm {
+				if err := visit(d); err != nil {
+					return err
+				}
+			}
+		}
+		inProgress[name] = false
+
+		visited[name] = true
+		ordered = append(ordered, c)
+		return nil
+	}
+
+	for _, c := range charts {
+		if !choose(c) {
+			continue
+		}
+
+		if err := visit(c); err != nil {
+			return nil, err
+		}
+	}
+
+	return ordered, nil
 }
