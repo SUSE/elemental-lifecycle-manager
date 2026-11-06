@@ -48,6 +48,10 @@ const (
 	// ConditionKubernetesUpgraded indicates the status of the Kubernetes upgrade.
 	// Pending -> InProgress -> Succeeded/Failed
 	ConditionKubernetesUpgraded = "KubernetesUpgraded"
+	// ConditionPriorityHelmChartsUpgraded indicates the status of a priority Helm chart upgrade that runs
+	// before the standard upgrade workflow.
+	// Pending -> InProgress -> Succeeded/Failed
+	ConditionPriorityHelmChartsUpgraded = "PriorityHelmChartsUpgraded"
 	// ConditionHelmChartsUpgraded indicates the status of Helm chart upgrade.
 	// Pending -> InProgress -> Succeeded/Failed
 	ConditionHelmChartsUpgraded = "HelmChartsUpgraded"
@@ -109,6 +113,9 @@ type ComponentConfig struct {
 type ChartConfig struct {
 	// Chart refers to the chart as seen in the target release manifest.
 	Chart string `json:"chart"`
+	// PriorityUpgrade overrides the upgrade priority of the specified chart.
+	// +optional
+	PriorityUpgrade *bool `json:"priorityUpgrade,omitempty"`
 	// Values allows for inline custom chart values specification.
 	// +optional
 	Values *apiextensionsv1.JSON `json:"values"`

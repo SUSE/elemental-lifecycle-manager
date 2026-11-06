@@ -244,9 +244,11 @@ func runtimeHelmChartConfigs(release *lifecyclev1alpha1.Release, charts ...strin
 		if configs == nil {
 			configs = make(map[string]upgrade.RuntimeHelmChartConfig)
 		}
+
 		configs[c.Chart] = upgrade.RuntimeHelmChartConfig{
-			Values:     c.Values,
-			ValuesFrom: upgrade.RuntimeHelmChartValuesFrom{SecretRef: secretRef},
+			PriorityUpgrade: c.PriorityUpgrade,
+			Values:          c.Values,
+			ValuesFrom:      upgrade.RuntimeHelmChartValuesFrom{SecretRef: secretRef},
 		}
 	}
 	return configs
