@@ -202,10 +202,10 @@ func main() {
 
 	sucPlanReconciler := reconcilers.NewSUCPlanReconciler(k8sClient)
 	if err := (&controller.ReleaseReconciler{
-		Client:           mgr.GetClient(),
-		Scheme:           mgr.GetScheme(),
-		RetrieveManifest: release.RetrieveManifest,
-		HelmClient:       helmClient,
+		Client:             mgr.GetClient(),
+		Scheme:             mgr.GetScheme(),
+		RetrieveManifest:   release.RetrieveManifest,
+		AutoUpgradeHandler: reconcilers.NewLCMHelmReconciler(k8sClient, helmClient),
 		Pipeline: upgrade.NewPipeline(
 			reconcilers.NewPriorityHelmReconciler(k8sClient, helmClient),
 			reconcilers.NewOSReconciler(k8sClient, sucPlanReconciler),

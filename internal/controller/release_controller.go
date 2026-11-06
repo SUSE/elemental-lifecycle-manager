@@ -24,7 +24,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/suse/elemental-lifecycle-manager/internal/helm"
 	"github.com/suse/elemental/v3/pkg/manifest/api"
 	"go.yaml.in/yaml/v3"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -61,9 +60,9 @@ type ReleaseReconciler struct {
 	client.Client
 	Scheme *k8sruntime.Scheme
 
-	RetrieveManifest func(ctx context.Context, registry, version string) (*resolver.ResolvedManifest, error)
-	Pipeline         *upgrade.Pipeline
-	HelmClient       helm.Client
+	RetrieveManifest   func(ctx context.Context, registry, version string) (*resolver.ResolvedManifest, error)
+	Pipeline           *upgrade.Pipeline
+	AutoUpgradeHandler upgrade.PhaseHandler
 
 	// RawManifests holds the raw core manifest used by the LCM self-upgrade phase. It is deliberately
 	// in-memory only: once LCMUpgraded is True the phase is skipped, so the manifest is only needed
@@ -130,34 +129,20 @@ func (r *ReleaseReconciler) reconcileNormal(ctx context.Context, release *lifecy
 
 	defer updateAppliedCondition(release, r.Pipeline.Phases())
 
-	var err error
-	// result must be non-nil even when the LCM phase is skipped, since the pipeline records its phase states in it.
-	result := &upgrade.Result{PhaseStates: make(map[upgrade.Phase]*upgrade.PhaseStatus)}
 	if !apimeta.IsStatusConditionTrue(release.Status.Conditions, upgrade.PhaseLCM.ConditionType()) {
-		config, err := r.lcmUpgradeConfig(ctx, release)
+		status, err := r.autoUpgrade(ctx, release)
 		if err != nil {
-			if configErr, ok := errors.AsType[upgrade.ConfigError](err); ok {
-				logger.Info("Invalid upgrade configuration", "error", configErr.Error())
+			return ctrl.Result{}, err
+		}
 
-				setCondition(release, lifecyclev1alpha1.ConditionApplied, metav1.ConditionFalse,
-					lifecyclev1alpha1.UpgradeFailed, configErr.Error())
+		if s := status.State; s != lifecyclev1alpha1.UpgradeSucceeded && s != lifecyclev1alpha1.UpgradeSkipped {
+			if s == lifecyclev1alpha1.UpgradeFailed {
 				return ctrl.Result{}, nil
 			}
-			return ctrl.Result{}, fmt.Errorf("parsing self-upgrade config: %w", err)
-		}
-
-		status, err := r.reconcileLCM(ctx, config)
-		if err != nil {
-			setPhaseConditionFromError(release, err)
-			logger.Error(err, "LCM upgrade failed")
-			return ctrl.Result{}, nil
-		}
-		updatePhaseCondition(release, upgrade.PhaseLCM, status)
-
-		if status.State != lifecyclev1alpha1.UpgradeSucceeded {
 			return ctrl.Result{RequeueAfter: requeueInterval}, nil
 		}
 	}
+
 	manifest, err := r.getOrRetrieveManifest(ctx, release)
 	if err != nil {
 		setCondition(release, lifecyclev1alpha1.ConditionManifestResolved, metav1.ConditionFalse,
@@ -188,7 +173,7 @@ func (r *ReleaseReconciler) reconcileNormal(ctx context.Context, release *lifecy
 		}
 	}
 
-	result, err = r.Pipeline.Reconcile(ctx, config)
+	result, err := r.Pipeline.Reconcile(ctx, config)
 	if err != nil {
 		setPhaseConditionFromError(release, err)
 		return ctrl.Result{}, fmt.Errorf("reconciling upgrade: %w", err)
@@ -204,17 +189,27 @@ func (r *ReleaseReconciler) reconcileNormal(ctx context.Context, release *lifecy
 	return ctrl.Result{RequeueAfter: requeueInterval}, nil
 }
 
-func (r *ReleaseReconciler) reconcileLCM(ctx context.Context, config *upgrade.Config) (*upgrade.PhaseStatus, error) {
-	lcmReconciler := reconcilers.NewLCMHelmReconciler(r.Client, r.HelmClient)
-	status, err := lcmReconciler.Reconcile(ctx, config)
+// autoUpgrade upgrades the LCM charts to the target release and returns the resulting LCM phase status.
+func (r *ReleaseReconciler) autoUpgrade(ctx context.Context, release *lifecyclev1alpha1.Release) (*upgrade.PhaseStatus, error) {
+	config, err := r.prepareAutoUpgradeConfig(ctx, release)
 	if err != nil {
-		return &upgrade.PhaseStatus{},
-			&upgrade.PhaseError{
-				Phase: upgrade.PhaseLCM,
-				Err:   err,
-			}
+		if configErr, ok := errors.AsType[upgrade.ConfigError](err); ok {
+			log.FromContext(ctx).Info("Invalid LCM upgrade configuration", "error", configErr.Error())
+			setCondition(release, lifecyclev1alpha1.ConditionApplied, metav1.ConditionFalse,
+				lifecyclev1alpha1.UpgradeFailed, configErr.Error())
+			return &upgrade.PhaseStatus{State: lifecyclev1alpha1.UpgradeFailed, Message: configErr.Error()}, nil
+		}
+		return nil, fmt.Errorf("preparing LCM upgrade config: %w", err)
 	}
 
+	status, err := r.AutoUpgradeHandler.Reconcile(ctx, config)
+	if err != nil {
+		log.FromContext(ctx).Error(err, "LCM upgrade failed")
+		setCondition(release, upgrade.PhaseLCM.ConditionType(), metav1.ConditionFalse, lifecyclev1alpha1.UpgradeFailed, err.Error())
+		return &upgrade.PhaseStatus{State: lifecyclev1alpha1.UpgradeFailed, Message: err.Error()}, nil
+	}
+
+	updatePhaseCondition(release, upgrade.PhaseLCM, status)
 	return status, nil
 }
 
@@ -248,10 +243,10 @@ func runtimeHelmChartConfigs(release *lifecyclev1alpha1.Release, charts ...strin
 	return configs
 }
 
-// lcmUpgradeConfig parses a Release instance and creates an upgrade.Config for the purpose of self-upgrading LCM
+// prepareAutoUpgradeConfig parses a Release instance and creates an upgrade.Config for the purpose of self-upgrading LCM
 // by focusing only on LCM charts.
-func (r *ReleaseReconciler) lcmUpgradeConfig(ctx context.Context, release *lifecyclev1alpha1.Release) (*upgrade.Config, error) {
-	data, err := r.getOrRetrieveUpgradeManifest(ctx, release)
+func (r *ReleaseReconciler) prepareAutoUpgradeConfig(ctx context.Context, release *lifecyclev1alpha1.Release) (*upgrade.Config, error) {
+	data, err := r.getOrRetrieveRawCoreManifest(ctx, release)
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +269,7 @@ func (r *ReleaseReconciler) lcmUpgradeConfig(ctx context.Context, release *lifec
 	}
 
 	if err := yaml.Unmarshal(data, &core); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parsing partial core manifest: %w", err)
 	}
 
 	var lcmHelm api.Helm
@@ -298,39 +293,20 @@ func (r *ReleaseReconciler) lcmUpgradeConfig(ctx context.Context, release *lifec
 	)
 }
 
-// getOrRetrieveUpgradeManifest returns the raw Core manifest bytes for the Release used to trigger the upgrade.
-// The raw bytes are kept separate from the ResolvedManifest because the LCM phase must not depend on the
-// elemental manifest library's types, and are cached in memory only.
-func (r *ReleaseReconciler) getOrRetrieveUpgradeManifest(ctx context.Context, release *lifecyclev1alpha1.Release) ([]byte, error) {
+// getOrRetrieveRawCoreManifest returns the raw core manifest bytes for the Release that triggered the upgrade.
+func (r *ReleaseReconciler) getOrRetrieveRawCoreManifest(ctx context.Context, release *lifecyclev1alpha1.Release) ([]byte, error) {
 	imageRef := fmt.Sprintf("%s:%s", release.Spec.Registry, release.Spec.Version)
 	if data, ok := r.RawManifests[imageRef]; ok {
 		return data, nil
 	}
 
-	manifestData, err := releasecache.ReadManifest(ctx, imageRef)
+	data, err := releasecache.ReadRawCoreManifest(ctx, imageRef)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading core manifest: %w", err)
 	}
 
-	var solution struct {
-		CorePlatform struct {
-			Image string `yaml:"image"`
-		} `yaml:"corePlatform"`
-	}
-	if err = yaml.Unmarshal(manifestData, &solution); err != nil {
-		return nil, err
-	}
-
-	if solution.CorePlatform.Image != "" {
-		// we're working with a solution manifest; let's grab the core manifest for LCM charts
-		manifestData, err = releasecache.ReadManifest(ctx, solution.CorePlatform.Image)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	r.RawManifests[imageRef] = manifestData
-	return manifestData, nil
+	r.RawManifests[imageRef] = data
+	return data, nil
 }
 
 // updateReleaseStatus persists the specified release status using the latest Release resource state.
