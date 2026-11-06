@@ -66,27 +66,40 @@ type HelmReconciler struct {
 	releaseVersion string
 	// strict defines if the reconciler should fail on upgrade of a chart
 	strict bool
+	// phase is the upgrade phase that this reconciler serves
+	phase upgrade.Phase
 }
 
-// NewHelmReconciler creates a new Helm reconciler.
-func NewHelmReconciler(c client.Client, h helm.Client, strict bool) *HelmReconciler {
-	return &HelmReconciler{
-		Client:     c,
-		helmClient: h,
-		strict:     strict,
-	}
+// NewPriorityHelmReconciler returns a Helm reconciler that handles the upgrade for charts from the priority upgrade phase.
+func NewPriorityHelmReconciler(c client.Client, h helm.Client) *HelmReconciler {
+	return &HelmReconciler{Client: c, helmClient: h, phase: upgrade.PhasePriorityHelmCharts, strict: true}
+}
+
+// NewStandardHelmReconciler returns a Helm reconciler that handles the upgrade for charts from the standard upgrade phase.
+func NewStandardHelmReconciler(c client.Client, h helm.Client) *HelmReconciler {
+	return &HelmReconciler{Client: c, helmClient: h, phase: upgrade.PhaseHelmCharts}
+}
+
+// NewLCMHelmReconciler returns a Helm reconciler that handles the upgrade for charts from the Elemental Lifecycle Manager upgrade phase.
+func NewLCMHelmReconciler(c client.Client, h helm.Client) *HelmReconciler {
+	return &HelmReconciler{Client: c, helmClient: h, phase: upgrade.PhaseLCM, strict: true}
 }
 
 func (r *HelmReconciler) Phase() upgrade.Phase {
-	return upgrade.PhaseHelmCharts
+	return r.phase
 }
 
 func (r *HelmReconciler) Reconcile(ctx context.Context, config *upgrade.Config) (*upgrade.PhaseStatus, error) {
-	if config == nil || config.HelmCharts == nil || len(config.HelmCharts) == 0 {
+	if config == nil {
 		return r.Phase().SkippedStatus(), nil
 	}
 
-	return r.reconcileHelmCharts(ctx, config.ReleaseNamespacedName.Name, config.ReleaseVersion, config.HelmCharts)
+	charts := config.HelmCharts[r.phase]
+	if len(charts) == 0 {
+		return r.Phase().SkippedStatus(), nil
+	}
+
+	return r.reconcileHelmCharts(ctx, config.ReleaseNamespacedName.Name, config.ReleaseVersion, charts)
 }
 
 // reconcileHelmCharts ensures the HelmChart resources exist and are up to date.
