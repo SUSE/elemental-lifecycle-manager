@@ -94,6 +94,8 @@ type RuntimeConfigError string
 func (c RuntimeConfigError) Error() string { return string(c) }
 
 type RuntimeHelmChartConfig struct {
+	// PriorityUpgrade specifies the upgrade priority of the chart.
+	PriorityUpgrade *bool
 	// Values specifies custom values provided by the user inline.
 	Values *apiextensionsv1.JSON
 	// ValuesFrom specifies custom values provided from a specific source (e.g. Secret).

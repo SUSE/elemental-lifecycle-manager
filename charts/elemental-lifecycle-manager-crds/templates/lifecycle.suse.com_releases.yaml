@@ -51,6 +51,10 @@ spec:
                           description: Chart refers to the chart as seen in the target
                             release manifest.
                           type: string
+                        priorityUpgrade:
+                          description: PriorityUpgrade overrides the upgrade priority
+                            of the specified chart.
+                          type: boolean
                         values:
                           description: Values allows for inline custom chart values
                             specification.
