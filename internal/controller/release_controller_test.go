@@ -35,6 +35,7 @@ import (
 	lifecyclev1alpha1 "github.com/suse/elemental-lifecycle-manager/api/v1alpha1"
 	"github.com/suse/elemental-lifecycle-manager/internal/helm"
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade"
+	"github.com/suse/elemental-lifecycle-manager/internal/upgrade/reconcilers"
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade/reconcilers/testutil"
 	"github.com/suse/elemental/v3/pkg/manifest/api"
 	"github.com/suse/elemental/v3/pkg/manifest/api/core"
@@ -62,6 +63,7 @@ func (s stubPhaseHandler) Reconcile(context.Context, *upgrade.Config) (*upgrade.
 var _ = Describe("Release Controller", func() {
 	Context("When reconciling a resource", func() {
 		const resourceName = "test-resource"
+		const defaultNamespace = "default"
 		const fooBarRegistry = "https://foo.bar.com"
 		var typeNamespacedName types.NamespacedName
 		var defaultCtx context.Context
@@ -71,19 +73,30 @@ var _ = Describe("Release Controller", func() {
 		var defaultRelease *lifecyclev1alpha1.Release
 
 		release := &lifecyclev1alpha1.Release{}
+		deleteReleaseAndManifestCache := func(ctx context.Context, nn types.NamespacedName) {
+			release := &lifecyclev1alpha1.Release{}
+			Expect(k8sClient.Get(ctx, nn, release)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, release)).To(Succeed())
+
+			cacheConfigMap := &corev1.ConfigMap{}
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: "release-manifest-cache", Namespace: nn.Namespace}, cacheConfigMap)
+			if err == nil {
+				Expect(k8sClient.Delete(ctx, cacheConfigMap)).To(Succeed())
+			}
+		}
 
 		BeforeEach(func() {
 			By("creating the custom resource for the Kind Release")
 			defaultCtx = context.Background()
 			typeNamespacedName = types.NamespacedName{
 				Name:      resourceName,
-				Namespace: "default",
+				Namespace: defaultNamespace,
 			}
 
 			defaultRelease = &lifecyclev1alpha1.Release{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      resourceName,
-					Namespace: "default",
+					Namespace: defaultNamespace,
 				},
 				Spec: lifecyclev1alpha1.ReleaseSpec{
 					Version:  "0.0.0",
@@ -95,13 +108,13 @@ var _ = Describe("Release Controller", func() {
 				Expect(k8sClient.Create(defaultCtx, defaultRelease)).To(Succeed())
 			}
 
-			defaultManifestRetrieve = func(_ context.Context, _, _ string) (*resolver.ResolvedManifest, error) { //nolint:unparam
-
+			// defaultManifestRetrieve returns the smallest release manifest that the upgrade config can be built from.
+			defaultManifestRetrieve = func(context.Context, string, string) (*resolver.ResolvedManifest, error) { //nolint:unparam
 				return &resolver.ResolvedManifest{
 					CorePlatform: &core.ReleaseManifest{
 						Components: core.Components{
-							OperatingSystem: &core.OperatingSystem{},
-							Kubernetes:      &core.Kubernetes{},
+							OperatingSystem: &core.OperatingSystem{Image: core.Image{Base: "registry.example.com/os:1.0.0"}},
+							Kubernetes:      &core.Kubernetes{Version: "v1.33.0", Image: "registry.example.com/k8s"},
 						},
 					},
 				}, nil
@@ -143,9 +156,6 @@ var _ = Describe("Release Controller", func() {
 			var lcmReconciler *ReleaseReconciler
 			var mockHelmClient *testutil.MockHelmClient
 
-			// coreManifest declares a single LCM chart so that lcmUpgradeConfig builds a
-			// non-empty upgrade.Config, which is what lets reconcileLCM reach the Helm
-			// reconciler at all rather than short-circuiting to SkippedStatus.
 			const coreManifest = `
 components:
   helm:
@@ -208,11 +218,11 @@ components:
 						stubPhaseHandler{phase: upgrade.PhaseKubernetes},
 						stubPhaseHandler{phase: upgrade.PhaseHelmCharts},
 					),
-					HelmClient:   mockHelmClient,
-					RawManifests: make(map[string][]byte),
+					AutoUpgradeHandler: reconcilers.NewLCMHelmReconciler(k8sClient, mockHelmClient),
+					RawManifests:       make(map[string][]byte),
 				}
 
-				By("seeding the in-memory raw manifest cache so lcmUpgradeConfig does not reach out to a registry")
+				By("seeding the in-memory raw manifest cache so prepareAutoUpgradeConfig does not reach out to a registry")
 				imageRef := fmt.Sprintf("%s:%s", lcmRelease.Spec.Registry, lcmRelease.Spec.Version)
 				lcmReconciler.RawManifests[imageRef] = []byte(coreManifest)
 			})
@@ -264,22 +274,20 @@ components:
 			})
 		})
 
-		Context("When the LCM upgrade has already succeeded", func() {
+		Context("When the LCM upgrade was completed in an earlier reconcile", func() {
 			const releaseName = "test-resource-lcm-done"
-			const releaseNamespace = "default"
 			const releaseVersion = "0.3.0"
-			const manifestCacheName = "release-manifest-cache"
 
 			var doneCtx context.Context
 			var doneNN types.NamespacedName
 
 			BeforeEach(func() {
 				doneCtx = context.Background()
-				doneNN = types.NamespacedName{Name: releaseName, Namespace: releaseNamespace}
+				doneNN = types.NamespacedName{Name: releaseName, Namespace: defaultNamespace}
 
 				By("creating a Release whose LCMUpgraded condition is already True")
 				release := &lifecyclev1alpha1.Release{
-					ObjectMeta: metav1.ObjectMeta{Name: releaseName, Namespace: releaseNamespace},
+					ObjectMeta: metav1.ObjectMeta{Name: releaseName, Namespace: defaultNamespace},
 					Spec: lifecyclev1alpha1.ReleaseSpec{
 						Version:      releaseVersion,
 						Registry:     fooBarRegistry,
@@ -298,15 +306,7 @@ components:
 			})
 
 			AfterEach(func() {
-				release := &lifecyclev1alpha1.Release{}
-				Expect(k8sClient.Get(doneCtx, doneNN, release)).To(Succeed())
-				Expect(k8sClient.Delete(doneCtx, release)).To(Succeed())
-
-				cacheConfigMap := &corev1.ConfigMap{}
-				err := k8sClient.Get(doneCtx, types.NamespacedName{Name: manifestCacheName, Namespace: releaseNamespace}, cacheConfigMap)
-				if err == nil {
-					Expect(k8sClient.Delete(doneCtx, cacheConfigMap)).To(Succeed())
-				}
+				deleteReleaseAndManifestCache(doneCtx, doneNN)
 			})
 
 			It("should skip the LCM phase and carry on with the rest of the pipeline", func() {
@@ -318,23 +318,14 @@ components:
 				}
 
 				reconciler := &ReleaseReconciler{
-					Client: k8sClient,
-					Scheme: k8sClient.Scheme(),
-					RetrieveManifest: func(context.Context, string, string) (*resolver.ResolvedManifest, error) {
-						return &resolver.ResolvedManifest{
-							CorePlatform: &core.ReleaseManifest{
-								Components: core.Components{
-									OperatingSystem: &core.OperatingSystem{Image: core.Image{Base: "registry.example.com/os:1.0.0"}},
-									Kubernetes:      &core.Kubernetes{Version: "v1.33.0", Image: "registry.example.com/k8s"},
-								},
-							},
-						}, nil
-					},
+					Client:           k8sClient,
+					Scheme:           k8sClient.Scheme(),
+					RetrieveManifest: defaultManifestRetrieve,
 					Pipeline: upgrade.NewPipeline(stubPhaseHandler{
 						phase:  upgrade.PhaseOS,
 						status: &upgrade.PhaseStatus{State: lifecyclev1alpha1.UpgradeSucceeded, Message: "OS upgraded"},
 					}),
-					HelmClient: helmClient,
+					AutoUpgradeHandler: reconcilers.NewLCMHelmReconciler(k8sClient, helmClient),
 				}
 
 				result, err := reconciler.Reconcile(doneCtx, reconcile.Request{NamespacedName: doneNN})
@@ -383,8 +374,8 @@ components:
 						}, nil
 					},
 					// The stub fails if the pipeline runs, which it must not.
-					Pipeline:   upgrade.NewPipeline(stubPhaseHandler{phase: upgrade.PhaseOS}),
-					HelmClient: testutil.NewMockHelmClient(),
+					Pipeline:           upgrade.NewPipeline(stubPhaseHandler{phase: upgrade.PhaseOS}),
+					AutoUpgradeHandler: reconcilers.NewLCMHelmReconciler(k8sClient, testutil.NewMockHelmClient()),
 				}
 
 				_, err := reconciler.Reconcile(doneCtx, reconcile.Request{NamespacedName: doneNN})
@@ -399,5 +390,106 @@ components:
 				Expect(applied.Message).To(ContainSubstring("circular dependency detected involving chart foo"))
 			})
 		})
+
+		Context("When the LCM charts are upgraded in this reconcile", func() {
+			const releaseVersion = "0.3.0"
+			const coreManifest = `
+components:
+  helm:
+    charts:
+      - chart: elemental-lifecycle-manager
+        version: 0.3.0
+`
+			takeoverCtx := context.Background()
+			takeoverNN := types.NamespacedName{Name: "test-resource-lcm-takeover", Namespace: defaultNamespace}
+			newReconciler := func(chartVersion string) *ReleaseReconciler {
+				return &ReleaseReconciler{
+					Client:   k8sClient,
+					Pipeline: upgrade.NewPipeline(),
+					AutoUpgradeHandler: stubPhaseHandler{
+						phase:  upgrade.PhaseLCM,
+						status: &upgrade.PhaseStatus{State: lifecyclev1alpha1.UpgradeSucceeded},
+					},
+					RawManifests: map[string][]byte{fooBarRegistry + ":" + releaseVersion: []byte(coreManifest)},
+					ChartVersion: chartVersion,
+				}
+			}
+
+			BeforeEach(func() {
+				release := &lifecyclev1alpha1.Release{
+					ObjectMeta: metav1.ObjectMeta{Name: takeoverNN.Name, Namespace: takeoverNN.Namespace},
+					Spec:       lifecyclev1alpha1.ReleaseSpec{Version: releaseVersion, Registry: fooBarRegistry},
+				}
+				Expect(k8sClient.Create(takeoverCtx, release)).To(Succeed())
+
+				release.Status.ObservedGeneration = release.Generation
+				Expect(k8sClient.Status().Update(takeoverCtx, release)).To(Succeed())
+			})
+
+			AfterEach(func() {
+				deleteReleaseAndManifestCache(takeoverCtx, takeoverNN)
+			})
+
+			It("should not continue the upgrade while the old LCM process is still running", func() {
+				reconciler := newReconciler("0.2.0")
+
+				result, err := reconciler.Reconcile(takeoverCtx, reconcile.Request{NamespacedName: takeoverNN})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).To(Equal(requeueInterval))
+
+				updated := &lifecyclev1alpha1.Release{}
+				Expect(k8sClient.Get(takeoverCtx, takeoverNN, updated)).To(Succeed())
+
+				lcmCond := apimeta.FindStatusCondition(updated.Status.Conditions, upgrade.PhaseLCM.ConditionType())
+				Expect(lcmCond).NotTo(BeNil())
+				Expect(lcmCond.Reason).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
+				Expect(lcmCond.Message).To(Equal("Waiting for a running process with 0.3.0 version"))
+			})
+
+			It("should continue the upgrade once the new LCM process is running", func() {
+				reconciler := newReconciler("0.3.0")
+				reconciler.RetrieveManifest = defaultManifestRetrieve
+
+				_, err := reconciler.Reconcile(takeoverCtx, reconcile.Request{NamespacedName: takeoverNN})
+				Expect(err).NotTo(HaveOccurred())
+
+				updated := &lifecyclev1alpha1.Release{}
+				Expect(k8sClient.Get(takeoverCtx, takeoverNN, updated)).To(Succeed())
+				Expect(apimeta.IsStatusConditionTrue(updated.Status.Conditions, upgrade.PhaseLCM.ConditionType())).To(BeTrue())
+				Expect(updated.Status.Version).To(Equal(releaseVersion))
+			})
+		})
+	})
+
+	Describe("confirmTakeover", func() {
+		succeeded := func() *upgrade.PhaseStatus {
+			return &upgrade.PhaseStatus{State: lifecyclev1alpha1.UpgradeSucceeded}
+		}
+		lcmChart := []*upgrade.HelmChartConfig{{Chart: &api.HelmChart{Chart: upgrade.LCMChartName, Version: "0.3.0"}}}
+
+		DescribeTable("checking whether the running LCM process is at the target version",
+			func(status *upgrade.PhaseStatus, running string, charts []*upgrade.HelmChartConfig, waits bool) {
+				r := &ReleaseReconciler{ChartVersion: running}
+				actual := r.confirmTakeover(status, &upgrade.Config{
+					HelmCharts: map[upgrade.Phase][]*upgrade.HelmChartConfig{upgrade.PhaseLCM: charts},
+				})
+
+				if !waits {
+					Expect(actual).To(BeIdenticalTo(status))
+					return
+				}
+				Expect(actual.State).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
+			},
+			Entry("waits when the target version is different", succeeded(), "0.2.0", lcmChart, true),
+			Entry("continues when the versions match", succeeded(), "0.3.0", lcmChart, false),
+			Entry("continues when the running version is unknown", succeeded(), "", lcmChart, false),
+			Entry("continues when the release has no LCM charts", succeeded(), "0.2.0", nil, false),
+			Entry("ignores the CRD chart version", succeeded(), "0.3.0", []*upgrade.HelmChartConfig{
+				{Chart: &api.HelmChart{Chart: upgrade.LCMCRDChartName, Version: "0.4.0"}},
+				{Chart: &api.HelmChart{Chart: upgrade.LCMChartName, Version: "0.3.0"}},
+			}, false),
+			Entry("leaves other states unchanged", &upgrade.PhaseStatus{State: lifecyclev1alpha1.UpgradeInProgress},
+				"0.2.0", lcmChart, false),
+		)
 	})
 })

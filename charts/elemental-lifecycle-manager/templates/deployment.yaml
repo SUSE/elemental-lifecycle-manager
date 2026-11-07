@@ -57,8 +57,9 @@ spec:
           args:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or (not .Values.webhook.enabled) .Values.extraEnv }}
           env:
+            - name: LCM_CHART_VERSION
+              value: {{ .Chart.Version | quote }}
             {{- if not .Values.webhook.enabled }}
             - name: ENABLE_WEBHOOKS
               value: "false"
@@ -66,7 +67,6 @@ spec:
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- end }}
           {{- if or .Values.metrics.enabled .Values.webhook.enabled }}
           ports:
             {{- if .Values.metrics.enabled }}

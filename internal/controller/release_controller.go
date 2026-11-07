@@ -50,11 +50,6 @@ import (
 
 const requeueInterval = 30 * time.Second
 
-const (
-	elementalLifecycleManager     = "elemental-lifecycle-manager"
-	elementalLifecycleManagerCRDs = "elemental-lifecycle-manager-crds"
-)
-
 // ReleaseReconciler reconciles a Release object
 type ReleaseReconciler struct {
 	client.Client
@@ -64,10 +59,12 @@ type ReleaseReconciler struct {
 	Pipeline           *upgrade.Pipeline
 	AutoUpgradeHandler upgrade.PhaseHandler
 
-	// RawManifests holds the raw core manifest used by the LCM self-upgrade phase. It is deliberately
-	// in-memory only: once LCMUpgraded is True the phase is skipped, so the manifest is only needed
-	// while LCM is upgrading itself, and after a restart it can be fetched from the registry again.
+	// RawManifests holds the raw core manifest used by the LCM self-upgrade phase. Ensures that between
+	// self-upgrade reconciliations we do not needlessly fetch the core manifest again.
 	RawManifests map[string][]byte
+
+	// ChartVersion is the version of the Elemental Lifecycle Manager chart that this process was deployed from.
+	ChartVersion string
 }
 
 // +kubebuilder:rbac:groups=lifecycle.suse.com,resources=releases,verbs=get;list;watch;create;update;patch;delete
@@ -209,8 +206,34 @@ func (r *ReleaseReconciler) autoUpgrade(ctx context.Context, release *lifecyclev
 		return &upgrade.PhaseStatus{State: lifecyclev1alpha1.UpgradeFailed, Message: err.Error()}, nil
 	}
 
+	// Safeguard against prematurely reporting a successful upgrade before the target LCM version is running.
+	// TODO(ivpe): confirmTakeover only compares chart versions. If the new LCM process updates its own chart
+	// (e.g. to apply a runtime property the previous process did not know about), the resulting rollout would
+	// not be detected and the outgoing process may start the upgrade pipeline with its previous configuration.
+	// Based on this, a more sophisticated guard would be needed to be implemented long-term.
+	status = r.confirmTakeover(status, config)
 	updatePhaseCondition(release, upgrade.PhaseLCM, status)
 	return status, nil
+}
+
+// confirmTakeover confirms whether the current LCM process is running a version that is defined in the desired
+// upgrade config. Returns 'InProgress' when the LCM charts are upgraded but the current process runs a different
+// version, indicating that the LCM pod has not yet been replaced. In all other cases the status is returned unchanged.
+func (r *ReleaseReconciler) confirmTakeover(status *upgrade.PhaseStatus, config *upgrade.Config) *upgrade.PhaseStatus {
+	if status.State != lifecyclev1alpha1.UpgradeSucceeded || r.ChartVersion == "" {
+		return status
+	}
+
+	for _, c := range config.HelmCharts[upgrade.PhaseLCM] {
+		if c.Chart.Chart == upgrade.LCMChartName && c.Chart.Version != r.ChartVersion {
+			return &upgrade.PhaseStatus{
+				State:   lifecyclev1alpha1.UpgradeInProgress,
+				Message: fmt.Sprintf("Waiting for a running process with %s version", c.Chart.Version),
+			}
+		}
+	}
+
+	return status
 }
 
 func runtimeHelmChartConfigs(release *lifecyclev1alpha1.Release, charts ...string) map[string]upgrade.RuntimeHelmChartConfig {
@@ -274,7 +297,7 @@ func (r *ReleaseReconciler) prepareAutoUpgradeConfig(ctx context.Context, releas
 
 	var lcmHelm api.Helm
 	for _, c := range core.Components.Helm.Charts {
-		if c.Chart == elementalLifecycleManager || c.Chart == elementalLifecycleManagerCRDs {
+		if c.Chart == upgrade.LCMChartName || c.Chart == upgrade.LCMCRDChartName {
 			lcmHelm.Charts = append(lcmHelm.Charts, &api.HelmChart{
 				Chart: c.Chart, Repository: c.Repository, Version: c.Version, Values: c.Values,
 			})
@@ -289,7 +312,7 @@ func (r *ReleaseReconciler) prepareAutoUpgradeConfig(ctx context.Context, releas
 		types.NamespacedName{Name: release.Name, Namespace: release.Namespace},
 		release.Spec.Version,
 		&lcmHelm,
-		runtimeHelmChartConfigs(release, elementalLifecycleManager),
+		runtimeHelmChartConfigs(release, upgrade.LCMChartName),
 	)
 }
 
