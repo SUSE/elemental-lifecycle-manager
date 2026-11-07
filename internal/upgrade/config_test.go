@@ -204,7 +204,7 @@ var _ = Describe("Configuration creation", func() {
 		Expect(k8sConfig.Version).To(Equal(k8sVersion))
 
 		// Helm validation
-		Expect(config.HelmCharts).To(HaveLen(3))
+		Expect(config.HelmCharts).To(HaveLen(2))
 
 		coreHelmChartConfig := &HelmChartConfig{
 			Chart:      coreChart,
@@ -216,12 +216,6 @@ var _ = Describe("Configuration creation", func() {
 			},
 		}
 		Expect(config.HelmCharts[PhasePriorityHelmCharts]).To(Equal([]*HelmChartConfig{coreHelmChartConfig}))
-
-		lcmHelmChartConfig := &HelmChartConfig{
-			Chart:      lcmChart,
-			Repository: lcmChartRepo,
-		}
-		Expect(config.HelmCharts[PhaseLCM]).To(Equal([]*HelmChartConfig{lcmHelmChartConfig}))
 
 		solutionHelmChartConfig := &HelmChartConfig{
 			Chart:      solutionChart,
@@ -351,7 +345,7 @@ var _ = Describe("Helm chart selection", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(chartNames(priority)).To(Equal([]string{"foo"}))
 
-		groups, err := groupHelmChartsByPhase(charts)
+		groups, err := splitHelmChartsByPriority(charts)
 		Expect(err).To(MatchError(ContainSubstring("circular dependency detected involving chart bar")))
 		Expect(groups).To(BeNil())
 	})
@@ -361,7 +355,7 @@ var _ = Describe("Helm chart selection", func() {
 			c := newChartConfig("foo", chartPriority)
 			c.RuntimeConfig.PriorityUpgrade = runtimePriority
 
-			groups, err := groupHelmChartsByPhase([]*HelmChartConfig{c})
+			groups, err := splitHelmChartsByPriority([]*HelmChartConfig{c})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(chartNames(groups[PhasePriorityHelmCharts])).To(Equal(expectedPriority))
 			Expect(chartNames(groups[PhaseHelmCharts])).To(Equal(expectedStandard))
@@ -374,7 +368,7 @@ var _ = Describe("Helm chart selection", func() {
 
 	DescribeTable("priority and standard groups never share a chart",
 		func(charts []*HelmChartConfig, expectedPriority, expectedStandard []string) {
-			groups, err := groupHelmChartsByPhase(charts)
+			groups, err := splitHelmChartsByPriority(charts)
 			Expect(err).NotTo(HaveOccurred())
 
 			priority := chartNames(groups[PhasePriorityHelmCharts])
@@ -418,14 +412,14 @@ var _ = Describe("Helm chart selection", func() {
 			standardChart("bar", lcmCRDChartName),
 		}
 
-		groups, err := groupHelmChartsByPhase(charts)
+		groups, err := splitHelmChartsByPriority(charts)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(chartNames(groups[PhasePriorityHelmCharts])).To(Equal([]string{"foo"}))
 		Expect(chartNames(groups[PhaseHelmCharts])).To(Equal([]string{"bar"}))
 	})
 
 	It("should return nil for no charts", func() {
-		groups, err := groupHelmChartsByPhase(nil)
+		groups, err := splitHelmChartsByPriority(nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(groups).To(BeNil())
 	})

@@ -172,15 +172,25 @@ func NewConfig(manifest *resolver.ResolvedManifest, releaseVersion string, relea
 // self-upgrade workflow.
 func NewSelfUpgradeConfig(releaseNN types.NamespacedName, releaseVersion string, charts *api.Helm,
 	runtimeCharts map[string]RuntimeHelmChartConfig) (*Config, error) {
-	grouped, err := parseHelmCharts(charts, nil, runtimeCharts)
+
+	runtimeCharts = maps.Clone(runtimeCharts)
+	maps.DeleteFunc(runtimeCharts, func(chart string, _ RuntimeHelmChartConfig) bool { return !isLCMChart(chart) })
+	all, err := buildHelmChartConfig(charts, nil, runtimeCharts)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parsing helm chart configuration: %w", err)
+	}
+
+	lcm, err := filterWithDependencies(all, func(c *HelmChartConfig) bool { return isLCMChart(c.Chart.Chart) })
+	if err != nil {
+		return nil, fmt.Errorf("filtering LCM charts: %w", err)
 	}
 
 	return &Config{
 		ReleaseNamespacedName: releaseNN,
 		ReleaseVersion:        releaseVersion,
-		HelmCharts:            map[Phase][]*HelmChartConfig{PhaseLCM: grouped[PhaseLCM]},
+		HelmCharts: map[Phase][]*HelmChartConfig{
+			PhaseLCM: slices.DeleteFunc(lcm, func(c *HelmChartConfig) bool { return !isLCMChart(c.Chart.Chart) }),
+		},
 	}, nil
 }
 
@@ -191,9 +201,9 @@ func parseHelmCharts(core, solution *api.Helm, runtimeCharts map[string]RuntimeH
 		return nil, fmt.Errorf("parsing helm chart configuration: %w", err)
 	}
 
-	grouped, err := groupHelmChartsByPhase(charts)
+	grouped, err := splitHelmChartsByPriority(charts)
 	if err != nil {
-		return nil, fmt.Errorf("grouping helm charts by phase: %w", err)
+		return nil, fmt.Errorf("splitting helm charts by priority: %w", err)
 	}
 
 	return grouped, nil
@@ -265,16 +275,11 @@ func buildHelmChartConfig(core, solution *api.Helm, runtimeConfigs map[string]Ru
 	return chartConfig, nil
 }
 
-// groupHelmChartsByPhase groups the given charts by the phase in which they are upgraded. Returns an error if a
-// dependency cycle is detected, or nil if no charts are specified.
-func groupHelmChartsByPhase(charts []*HelmChartConfig) (map[Phase][]*HelmChartConfig, error) {
+// splitHelmChartsByPriority groups the given charts based on their upgrade priority. Returns an error
+// if a dependency cycle is detected, or nil if no charts are specified.
+func splitHelmChartsByPriority(charts []*HelmChartConfig) (map[Phase][]*HelmChartConfig, error) {
 	if len(charts) == 0 {
 		return nil, nil
-	}
-
-	lcm, err := filterWithDependencies(charts, isLCMChart)
-	if err != nil {
-		return nil, fmt.Errorf("filtering LCM charts: %w", err)
 	}
 
 	priority, err := filterWithDependencies(charts, isPriorityChart)
@@ -287,11 +292,9 @@ func groupHelmChartsByPhase(charts []*HelmChartConfig) (map[Phase][]*HelmChartCo
 		return nil, fmt.Errorf("filtering standard charts: %w", err)
 	}
 
-	lcm = slices.DeleteFunc(lcm, func(c *HelmChartConfig) bool { return !isLCMChart(c) })
-
 	// The LCM chart is handled by the special self-upgrade workflow, so it should not be
 	// part of neither the priority nor standard upgrade phases.
-	priority = slices.DeleteFunc(priority, isLCMChart)
+	priority = slices.DeleteFunc(priority, func(c *HelmChartConfig) bool { return isLCMChart(c.Chart.Chart) })
 
 	// Charts in the priority phase are already upgraded when the standard phase runs, so
 	// make sure they are not needlessly added in the standard phase as well.
@@ -301,18 +304,17 @@ func groupHelmChartsByPhase(charts []*HelmChartConfig) (map[Phase][]*HelmChartCo
 	}
 
 	standard = slices.DeleteFunc(standard, func(c *HelmChartConfig) bool {
-		return isLCMChart(c) || inPriority[c.Chart.GetName()]
+		return isLCMChart(c.Chart.Chart) || inPriority[c.Chart.GetName()]
 	})
 
 	return map[Phase][]*HelmChartConfig{
-		PhaseLCM:                lcm,
 		PhasePriorityHelmCharts: priority,
 		PhaseHelmCharts:         standard,
 	}, nil
 }
 
-func isLCMChart(h *HelmChartConfig) bool {
-	return h.Chart.Chart == LCMChartName || h.Chart.Chart == LCMCRDChartName
+func isLCMChart(chart string) bool {
+	return chart == LCMChartName || chart == LCMCRDChartName
 }
 
 func isPriorityChart(c *HelmChartConfig) bool {

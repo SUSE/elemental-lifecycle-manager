@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/suse/elemental/v3/pkg/manifest/api"
@@ -236,7 +235,7 @@ func (r *ReleaseReconciler) confirmTakeover(status *upgrade.PhaseStatus, config 
 	return status
 }
 
-func runtimeHelmChartConfigs(release *lifecyclev1alpha1.Release, charts ...string) map[string]upgrade.RuntimeHelmChartConfig {
+func runtimeHelmChartConfigs(release *lifecyclev1alpha1.Release) map[string]upgrade.RuntimeHelmChartConfig {
 	componentConfig := release.Spec.ComponentConfig
 	if componentConfig == nil {
 		return nil
@@ -244,10 +243,6 @@ func runtimeHelmChartConfigs(release *lifecyclev1alpha1.Release, charts ...strin
 
 	var configs map[string]upgrade.RuntimeHelmChartConfig
 	for _, c := range componentConfig.Helm {
-		if len(charts) > 0 && !slices.Contains(charts, c.Chart) {
-			continue
-		}
-
 		var secretRef *upgrade.RuntimeSecretValueSource
 		if ref := c.ValuesFrom.SecretRef; ref != nil {
 			secretRef = &upgrade.RuntimeSecretValueSource{Name: ref.Name, Keys: ref.Keys}
@@ -282,6 +277,10 @@ func (r *ReleaseReconciler) prepareAutoUpgradeConfig(ctx context.Context, releas
 					Repository string         `yaml:"repository"`
 					Version    string         `yaml:"version"`
 					Values     map[string]any `yaml:"values"`
+					DependsOn  []struct {
+						Name string `yaml:"name"`
+						Type string `yaml:"type"`
+					} `yaml:"dependsOn"`
 				} `yaml:"charts"`
 				Repositories []struct {
 					Name string `yaml:"name"`
@@ -295,24 +294,27 @@ func (r *ReleaseReconciler) prepareAutoUpgradeConfig(ctx context.Context, releas
 		return nil, fmt.Errorf("parsing partial core manifest: %w", err)
 	}
 
-	var lcmHelm api.Helm
+	var helm api.Helm
 	for _, c := range core.Components.Helm.Charts {
-		if c.Chart == upgrade.LCMChartName || c.Chart == upgrade.LCMCRDChartName {
-			lcmHelm.Charts = append(lcmHelm.Charts, &api.HelmChart{
-				Chart: c.Chart, Repository: c.Repository, Version: c.Version, Values: c.Values,
-			})
+		deps := make([]api.HelmChartDependency, 0, len(c.DependsOn))
+		for _, d := range c.DependsOn {
+			deps = append(deps, api.HelmChartDependency{Name: d.Name, Type: api.DependencyType(d.Type)})
 		}
+
+		helm.Charts = append(helm.Charts, &api.HelmChart{
+			Chart: c.Chart, Repository: c.Repository, Version: c.Version, Values: c.Values, DependsOn: deps,
+		})
 	}
 
 	for _, repo := range core.Components.Helm.Repositories {
-		lcmHelm.Repositories = append(lcmHelm.Repositories, &api.HelmRepository{Name: repo.Name, URL: repo.URL})
+		helm.Repositories = append(helm.Repositories, &api.HelmRepository{Name: repo.Name, URL: repo.URL})
 	}
 
 	return upgrade.NewSelfUpgradeConfig(
 		types.NamespacedName{Name: release.Name, Namespace: release.Namespace},
 		release.Spec.Version,
-		&lcmHelm,
-		runtimeHelmChartConfigs(release, upgrade.LCMChartName),
+		&helm,
+		runtimeHelmChartConfigs(release),
 	)
 }
 
