@@ -30,6 +30,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+const (
+	LCMChartName    = "elemental-lifecycle-manager"
+	LCMCRDChartName = "elemental-lifecycle-manager-crds"
+)
+
 // Config represents a complete upgrade specification for all phases.
 type Config struct {
 	// ReleaseNamespacedName is the name and namespace of the Release resource.
@@ -307,7 +312,7 @@ func groupHelmChartsByPhase(charts []*HelmChartConfig) (map[Phase][]*HelmChartCo
 }
 
 func isLCMChart(h *HelmChartConfig) bool {
-	return h.Chart.Chart == "elemental-lifecycle-manager" || h.Chart.Chart == "elemental-lifecycle-manager-crds"
+	return h.Chart.Chart == LCMChartName || h.Chart.Chart == LCMCRDChartName
 }
 
 func isPriorityChart(c *HelmChartConfig) bool {
