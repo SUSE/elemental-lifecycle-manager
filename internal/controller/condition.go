@@ -99,30 +99,15 @@ func updatePhaseCondition(release *lifecyclev1alpha1.Release, phase upgrade.Phas
 
 // updateAppliedCondition sets the Applied condition based on all phase conditions.
 func updateAppliedCondition(release *lifecyclev1alpha1.Release, phases []upgrade.Phase) {
-	// if LCM upgrade has failed, only the Applied condition is updated; the other conditions are left as they are
-	lcmCond := apimeta.FindStatusCondition(release.Status.Conditions, upgrade.PhaseLCM.ConditionType())
-	if lcmCond != nil && lcmCond.Status == metav1.ConditionFalse && lcmCond.Reason == lifecyclev1alpha1.UpgradeFailed {
-		setCondition(release, lifecyclev1alpha1.ConditionApplied, metav1.ConditionFalse,
-			lifecyclev1alpha1.UpgradeFailed, "Upgrade failed as LCM upgrade failed")
-		return
-	}
-	// Check if manifest is retrieved
-	manifestCond := apimeta.FindStatusCondition(release.Status.Conditions, lifecyclev1alpha1.ConditionManifestResolved)
-	switch {
-	case manifestCond != nil && manifestCond.Reason == lifecyclev1alpha1.UpgradeFailed:
-		setCondition(release, lifecyclev1alpha1.ConditionApplied, metav1.ConditionFalse,
-			lifecyclev1alpha1.UpgradeFailed, manifestCond.Message)
-		return
-	case manifestCond == nil || manifestCond.Status != metav1.ConditionTrue:
-		// LCM upgrade still in progress; do nothing
-		return
+	conditionTypes := append(make([]string, 0, 2+len(phases)), upgrade.PhaseLCM.ConditionType(), lifecyclev1alpha1.ConditionManifestResolved)
+	for _, phase := range phases {
+		conditionTypes = append(conditionTypes, phase.ConditionType())
 	}
 
 	allSucceeded := true
-	var failedPhase, inProgressPhase string
+	var failedCondition, inProgressCondition string
 
-	for _, phase := range phases {
-		conditionType := phase.ConditionType()
+	for _, conditionType := range conditionTypes {
 		cond := apimeta.FindStatusCondition(release.Status.Conditions, conditionType)
 		if cond == nil {
 			allSucceeded = false
@@ -132,9 +117,9 @@ func updateAppliedCondition(release *lifecyclev1alpha1.Release, phases []upgrade
 		if cond.Status != metav1.ConditionTrue {
 			allSucceeded = false
 			if cond.Reason == lifecyclev1alpha1.UpgradeFailed {
-				failedPhase = conditionType
-			} else if cond.Reason == lifecyclev1alpha1.UpgradeInProgress && inProgressPhase == "" {
-				inProgressPhase = conditionType
+				failedCondition = conditionType
+			} else if cond.Reason == lifecyclev1alpha1.UpgradeInProgress && inProgressCondition == "" {
+				inProgressCondition = conditionType
 			}
 		}
 	}
@@ -143,11 +128,11 @@ func updateAppliedCondition(release *lifecyclev1alpha1.Release, phases []upgrade
 	case allSucceeded:
 		setCondition(release, lifecyclev1alpha1.ConditionApplied, metav1.ConditionTrue,
 			lifecyclev1alpha1.UpgradeSucceeded, "All upgrade phases completed successfully")
-	case failedPhase != "":
+	case failedCondition != "":
 		setCondition(release, lifecyclev1alpha1.ConditionApplied, metav1.ConditionFalse,
-			lifecyclev1alpha1.UpgradeFailed, fmt.Sprintf("Phase %s failed", failedPhase))
-	case inProgressPhase != "":
+			lifecyclev1alpha1.UpgradeFailed, fmt.Sprintf("%s failed", failedCondition))
+	case inProgressCondition != "":
 		setCondition(release, lifecyclev1alpha1.ConditionApplied, metav1.ConditionFalse,
-			lifecyclev1alpha1.UpgradeInProgress, fmt.Sprintf("Phase %s is in progress", inProgressPhase))
+			lifecyclev1alpha1.UpgradeInProgress, fmt.Sprintf("%s is in progress", inProgressCondition))
 	}
 }
