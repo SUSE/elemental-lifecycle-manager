@@ -91,6 +91,7 @@ func SanitizeVersion(version string) string {
 }
 
 // ReleaseSpec defines the desired state of Release
+// +kubebuilder:pruning:PreserveUnknownFields
 type ReleaseSpec struct {
 	// Version specifies the target version of the target release.
 	Version string `json:"version"`
@@ -105,11 +106,13 @@ type ReleaseSpec struct {
 	ComponentConfig *ComponentConfig `json:"componentConfiguration"`
 }
 
+// +kubebuilder:pruning:PreserveUnknownFields
 type ComponentConfig struct {
 	// Helm specifies configurations related to the helm release component.
 	Helm []ChartConfig `json:"helm"`
 }
 
+// +kubebuilder:pruning:PreserveUnknownFields
 type ChartConfig struct {
 	// Chart refers to the chart as seen in the target release manifest.
 	Chart string `json:"chart"`
@@ -124,12 +127,14 @@ type ChartConfig struct {
 	ValuesFrom ChartValuesFrom `json:"valuesFrom"`
 }
 
+// +kubebuilder:pruning:PreserveUnknownFields
 type ChartValuesFrom struct {
 	// SecretRef allows for custom chart values specification coming from a Kubernetes Secret
 	// located under the "kube-system" namespace.
 	SecretRef *SecretValueSource `json:"secretRef"`
 }
 
+// +kubebuilder:pruning:PreserveUnknownFields
 type SecretValueSource struct {
 	// Name is the Secret name as seen in the "kube-system" namespace.
 	// +kubebuilder:validation:MinLength=1
