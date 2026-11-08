@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -83,6 +84,15 @@ var _ = Describe("Release Controller", func() {
 			if err == nil {
 				Expect(k8sClient.Delete(ctx, cacheConfigMap)).To(Succeed())
 			}
+		}
+
+		addUnknownFields := func(ctx context.Context, nn types.NamespacedName) {
+			patch := []byte(`{"spec":{"unsupportedField":"x","componentConfiguration":{"helm":[{"chart":"foo","unsupportedChartField":true}]}}}`)
+			release := &lifecyclev1alpha1.Release{ObjectMeta: metav1.ObjectMeta{Name: nn.Name, Namespace: nn.Namespace}}
+			Expect(k8sClient.Patch(ctx, release, client.RawPatch(types.MergePatchType, patch))).To(Succeed())
+
+			release.Status.ObservedGeneration = release.Generation
+			Expect(k8sClient.Status().Update(ctx, release)).To(Succeed())
 		}
 
 		BeforeEach(func() {
@@ -389,6 +399,30 @@ components:
 				Expect(applied.Reason).To(Equal(lifecyclev1alpha1.UpgradeFailed))
 				Expect(applied.Message).To(ContainSubstring("circular dependency detected involving chart foo"))
 			})
+
+			It("should report a failed condition when the release contains unsupported fields", func() {
+				addUnknownFields(doneCtx, doneNN)
+
+				reconciler := &ReleaseReconciler{
+					Client:           k8sClient,
+					Scheme:           k8sClient.Scheme(),
+					RetrieveManifest: defaultManifestRetrieve,
+					Pipeline:         upgrade.NewPipeline(stubPhaseHandler{phase: upgrade.PhaseOS}),
+				}
+
+				result, err := reconciler.Reconcile(doneCtx, reconcile.Request{NamespacedName: doneNN})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result.RequeueAfter).To(BeZero())
+
+				updated := &lifecyclev1alpha1.Release{}
+				Expect(k8sClient.Get(doneCtx, doneNN, updated)).To(Succeed())
+				applied := apimeta.FindStatusCondition(updated.Status.Conditions, lifecyclev1alpha1.ConditionApplied)
+				Expect(applied).NotTo(BeNil())
+				Expect(applied.Status).To(Equal(metav1.ConditionFalse))
+				Expect(applied.Reason).To(Equal(lifecyclev1alpha1.UpgradeFailed))
+				Expect(applied.Message).To(ContainSubstring(`unknown field "spec.componentConfiguration.helm[0].unsupportedChartField"`))
+				Expect(applied.Message).To(ContainSubstring(`unknown field "spec.unsupportedField"`))
+			})
 		})
 
 		Context("When the LCM charts are upgraded in this reconcile", func() {
@@ -444,6 +478,17 @@ components:
 				Expect(lcmCond).NotTo(BeNil())
 				Expect(lcmCond.Reason).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
 				Expect(lcmCond.Message).To(Equal("Waiting for a running process with 0.3.0 version"))
+			})
+
+			It("should not validate fields meant for the new LCM version while the old LCM process is still running", func() {
+				addUnknownFields(takeoverCtx, takeoverNN)
+
+				_, err := newReconciler("0.2.0").Reconcile(takeoverCtx, reconcile.Request{NamespacedName: takeoverNN})
+				Expect(err).NotTo(HaveOccurred())
+
+				updated := &lifecyclev1alpha1.Release{}
+				Expect(k8sClient.Get(takeoverCtx, takeoverNN, updated)).To(Succeed())
+				Expect(apimeta.FindStatusCondition(updated.Status.Conditions, lifecyclev1alpha1.ConditionApplied)).To(BeNil())
 			})
 
 			It("should continue the upgrade once the new LCM process is running", func() {

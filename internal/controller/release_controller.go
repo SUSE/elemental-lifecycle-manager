@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/equality"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
@@ -408,6 +409,12 @@ func (r *ReleaseReconciler) parseDrainOpts(ctx context.Context, release *lifecyc
 }
 
 func (r *ReleaseReconciler) parseUpgradeConfig(ctx context.Context, manifest *resolver.ResolvedManifest, release *lifecyclev1alpha1.Release) (config *upgrade.Config, err error) {
+	// Release field validation is done post self-upgrade, ensuring that the only fields that
+	// are marked as invalid are the one's that are not part of the new LCM CRD.
+	if err := r.validateKnownFields(ctx, release); err != nil {
+		return nil, err
+	}
+
 	opts, err := r.parseDrainOpts(ctx, release)
 	if err != nil {
 		return nil, fmt.Errorf("parsing drain options: %w", err)
@@ -417,6 +424,23 @@ func (r *ReleaseReconciler) parseUpgradeConfig(ctx context.Context, manifest *re
 		release.Spec.Version,
 		types.NamespacedName{Name: release.Name, Namespace: release.Namespace},
 		&upgrade.RuntimeConfig{DrainOpts: opts, HelmCharts: runtimeHelmChartConfigs(release)})
+}
+
+// validateKnownFields reports whether there are Release fields that this LCM version does not support.
+func (r *ReleaseReconciler) validateKnownFields(ctx context.Context, release *lifecyclev1alpha1.Release) error {
+	// Unknown fields are dropped when the Release resource is decoded, so read the stored object as
+	// unstructured instead.
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(lifecyclev1alpha1.GroupVersion.WithKind("Release"))
+	if err := r.Get(ctx, client.ObjectKeyFromObject(release), u); err != nil {
+		return fmt.Errorf("fetching release: %w", err)
+	}
+
+	if err := k8sruntime.DefaultUnstructuredConverter.FromUnstructuredWithValidation(u.Object, &lifecyclev1alpha1.Release{}, true); err != nil {
+		return upgrade.ConfigError("Release contains fields not supported by this LCM version: " + err.Error())
+	}
+
+	return nil
 }
 
 // cleanupOldVersionPlans deletes SUC Plans from a previous version.

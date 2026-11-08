@@ -85,16 +85,20 @@ spec:
                               - keys
                               - name
                               type: object
+                              x-kubernetes-preserve-unknown-fields: true
                           required:
                           - secretRef
                           type: object
+                          x-kubernetes-preserve-unknown-fields: true
                       required:
                       - chart
                       type: object
+                      x-kubernetes-preserve-unknown-fields: true
                     type: array
                 required:
                 - helm
                 type: object
+                x-kubernetes-preserve-unknown-fields: true
               disableDrain:
                 description: DisableDrain specifies whether nodes drain should be
                   disabled.
@@ -110,6 +114,7 @@ spec:
             - registry
             - version
             type: object
+            x-kubernetes-preserve-unknown-fields: true
           status:
             description: status defines the observed state of Release
             properties:
