@@ -488,7 +488,9 @@ components:
 
 				updated := &lifecyclev1alpha1.Release{}
 				Expect(k8sClient.Get(takeoverCtx, takeoverNN, updated)).To(Succeed())
-				Expect(apimeta.FindStatusCondition(updated.Status.Conditions, lifecyclev1alpha1.ConditionApplied)).To(BeNil())
+				applied := apimeta.FindStatusCondition(updated.Status.Conditions, lifecyclev1alpha1.ConditionApplied)
+				Expect(applied).NotTo(BeNil())
+				Expect(applied.Reason).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
 			})
 
 			It("should continue the upgrade once the new LCM process is running", func() {

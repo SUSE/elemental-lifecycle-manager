@@ -171,12 +171,11 @@ func (r *ReleaseReconciler) reconcileNormal(ctx context.Context, release *lifecy
 	}
 
 	result, err := r.Pipeline.Reconcile(ctx, config)
+	updatePhaseConditions(release, result)
 	if err != nil {
 		setPhaseConditionFromError(release, err)
 		return ctrl.Result{}, fmt.Errorf("reconciling upgrade: %w", err)
 	}
-
-	updatePhaseConditions(release, result)
 
 	if result.AllComplete() {
 		release.Status.Version = config.ReleaseVersion
@@ -192,7 +191,7 @@ func (r *ReleaseReconciler) autoUpgrade(ctx context.Context, release *lifecyclev
 	if err != nil {
 		if configErr, ok := errors.AsType[upgrade.ConfigError](err); ok {
 			log.FromContext(ctx).Info("Invalid LCM upgrade configuration", "error", configErr.Error())
-			setCondition(release, lifecyclev1alpha1.ConditionApplied, metav1.ConditionFalse,
+			setCondition(release, upgrade.PhaseLCM.ConditionType(), metav1.ConditionFalse,
 				lifecyclev1alpha1.UpgradeFailed, configErr.Error())
 			return &upgrade.PhaseStatus{State: lifecyclev1alpha1.UpgradeFailed, Message: configErr.Error()}, nil
 		}
