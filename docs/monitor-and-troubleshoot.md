@@ -18,6 +18,7 @@ The table below summarizes the conditions LCM reports during an upgrade:
 |----------------------|-------------|
 | `LCMUpgraded`        | Tracks the LCM upgrade phase which upgrades the Helm charts for LCM itself and its CRDs if found in the manifest under upgrade |
 | `ManifestResolved`   | Indicates whether LCM retrieved and resolved the [release manifest](https://github.com/SUSE/elemental/blob/main/docs/release-manifest.md) for the requested version. |
+| `PriorityHelmChartsUpgraded`   | Tracks the upgrade of Helm charts marked with the [priorityUpgrade](./release-api.md#helm) field. |
 | `OSUpgraded`         | Tracks the operating system upgrade phase, including the related System Upgrade Controller Plans for `control-plane` and `worker` nodes. |
 | `KubernetesUpgraded` | Tracks the Kubernetes upgrade phase, including related System Upgrade Controller Plans and the availability of packaged Kubernetes components after node upgrades complete. |
 | `HelmChartsUpgraded` | Tracks the Helm chart upgrade phase for additional chart components defined in the release manifest. |
@@ -49,6 +50,18 @@ If this phase fails or stops progressing, inspect the following resources:
 |------------------------------------|---------------|--------------------------|-------------|
 | Manifest Cache ConfigMap           | LCM namespace | `release-manifest-cache` | Use it to confirm whether the release manifest was retrieved and cached. |
 | LCM Pod                            | LCM namespace | LCM Pod name             | Inspect LCM's logs for errors while retrieving, parsing, or caching the release manifest. |
+
+### Priority Helm Chart Upgrade
+
+Condition type: `PriorityHelmChartsUpgraded`
+
+If this phase fails or stops progressing, inspect the following resources:
+
+
+| Resource                | Namespace                 | Name        | Description |
+|-------------------------|---------------------------|-------------|------------- |
+| Helm Chart Pod          | `kube-system`             | `helm-install-<chart-name>` | Inspect the Pod logs for Helm chart errors. |
+| LCM Pod                 | `elemental-system`        | LCM Pod name | Inspect LCM's logs for any reconciliation errors. |
 
 ### Operating System Upgrade
 

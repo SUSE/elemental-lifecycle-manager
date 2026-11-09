@@ -57,10 +57,11 @@ spec:
 | Field                           | Description                                                              | Required |
 |---------------------------------|--------------------------------------------------------------------------|:--------:|
 | `[*].chart`                     | Reference to the chart in the release that will be configured.           | `true`   |
+| `[*].priorityUpgrade`           | Overrides the upgrade priority of the referenced chart.                  | `false`  |
 | `[*].values`                    | Custom Helm values configuration provided inline.                        | `false`  |
 | `[*].valuesFrom.secretRef`      | Apply Helm values configuration provided from a Kubernetes Secret.       | `false`  |
 | `[*].valuesFrom.secretRef.name` | Name of the secret from which to retrieve custom helm chart values. **The secret must be located in the `kube-system` namespace.** | `true` |
-| `[*].valuesFrom.secretRef.keys` | Data entries containing the desired values as seen in the Secret.        | `true` |
+| `[*].valuesFrom.secretRef.keys` | Data entries containing the desired values as seen in the Secret.        | `true`   |
 
 > NOTE: `[*].valuesFrom` takes precedence over `[*].values` definitions.
 
