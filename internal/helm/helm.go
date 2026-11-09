@@ -20,11 +20,14 @@ package helm
 import (
 	"fmt"
 
+	helmrelease "helm.sh/helm/v4/pkg/release"
 	releasev1 "helm.sh/helm/v4/pkg/release/v1"
 	helmstorage "helm.sh/helm/v4/pkg/storage"
 	helmdriver "helm.sh/helm/v4/pkg/storage/driver"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
@@ -72,11 +75,12 @@ type ReleaseInfo struct {
 // Client provides access to Helm release information.
 type Client interface {
 	RetrieveRelease(name string) (*ReleaseInfo, error)
+	RetrieveNamespacedRelease(namespace, name string) (*ReleaseInfo, error)
 }
 
 // StorageClient implements Client using Helm storage.
 type StorageClient struct {
-	*helmstorage.Storage
+	secrets corev1client.SecretsGetter
 }
 
 // NewClient creates a Helm storage client using the in-cluster config.
@@ -91,15 +95,26 @@ func NewClient() (*StorageClient, error) {
 		return nil, fmt.Errorf("creating kubernetes client: %w", err)
 	}
 
-	driver := helmdriver.NewSecrets(k8sClient.CoreV1().Secrets(""))
-	storage := helmstorage.Init(driver)
-
-	return &StorageClient{storage}, nil
+	return &StorageClient{secrets: k8sClient.CoreV1()}, nil
 }
 
-// RetrieveRelease retrieves the latest Helm release by name.
+// RetrieveRelease retrieves the latest Helm release by name, searching all namespaces.
 func (c *StorageClient) RetrieveRelease(name string) (*ReleaseInfo, error) {
-	rel, err := c.Last(name)
+	return releaseInfo(c.storage(metav1.NamespaceAll).Last(name))
+}
+
+// RetrieveNamespacedRelease retrieves the latest Helm release by name, searching only the given namespace.
+func (c *StorageClient) RetrieveNamespacedRelease(namespace, name string) (*ReleaseInfo, error) {
+	return releaseInfo(c.storage(namespace).Last(name))
+}
+
+// storage returns a Helm storage backed by the release Secrets in the given namespace.
+func (c *StorageClient) storage(namespace string) *helmstorage.Storage {
+	return helmstorage.Init(helmdriver.NewSecrets(c.secrets.Secrets(namespace)))
+}
+
+// releaseInfo converts the given Helm release to a ReleaseInfo.
+func releaseInfo(rel helmrelease.Releaser, err error) (*ReleaseInfo, error) {
 	if err != nil {
 		return nil, err
 	}
