@@ -137,6 +137,7 @@ var _ = Describe("Release Controller", func() {
 				Scheme:           k8sClient.Scheme(),
 				RetrieveManifest: defaultManifestRetrieve,
 				Pipeline:         defaultPipeline,
+				HelmClient:       testutil.NewMockHelmClient(),
 			}
 		})
 
@@ -336,6 +337,7 @@ components:
 						status: &upgrade.PhaseStatus{State: lifecyclev1alpha1.UpgradeSucceeded, Message: "OS upgraded"},
 					}),
 					AutoUpgradeHandler: reconcilers.NewLCMHelmReconciler(k8sClient, helmClient),
+					HelmClient:         testutil.NewMockHelmClient(),
 				}
 
 				result, err := reconciler.Reconcile(doneCtx, reconcile.Request{NamespacedName: doneNN})
@@ -386,6 +388,7 @@ components:
 					// The stub fails if the pipeline runs, which it must not.
 					Pipeline:           upgrade.NewPipeline(stubPhaseHandler{phase: upgrade.PhaseOS}),
 					AutoUpgradeHandler: reconcilers.NewLCMHelmReconciler(k8sClient, testutil.NewMockHelmClient()),
+					HelmClient:         testutil.NewMockHelmClient(),
 				}
 
 				_, err := reconciler.Reconcile(doneCtx, reconcile.Request{NamespacedName: doneNN})
@@ -446,6 +449,7 @@ components:
 					},
 					RawManifests: map[string][]byte{fooBarRegistry + ":" + releaseVersion: []byte(coreManifest)},
 					ChartVersion: chartVersion,
+					HelmClient:   testutil.NewMockHelmClient(),
 				}
 			}
 

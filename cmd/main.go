@@ -207,6 +207,7 @@ func main() {
 		RetrieveManifest:   release.RetrieveManifest,
 		AutoUpgradeHandler: reconcilers.NewLCMHelmReconciler(k8sClient, helmClient),
 		ChartVersion:       os.Getenv("LCM_CHART_VERSION"),
+		HelmClient:         helmClient,
 		Pipeline: upgrade.NewPipeline(
 			reconcilers.NewPriorityHelmReconciler(k8sClient, helmClient),
 			reconcilers.NewOSReconciler(k8sClient, sucPlanReconciler),

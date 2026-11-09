@@ -193,6 +193,8 @@ github.com/prometheus/common v0.70.1 h1:1HvjP4D5oL3t8RsPlwxA9onvvStjtIHYE5XuuwOi
 github.com/prometheus/common v0.70.1/go.mod h1:VdFUQDMZK3VLkurFUVhia6uys/0suUp86TJz5qbJRhc=
 github.com/prometheus/procfs v0.21.1 h1:GljZCt+zSTS+NZq88cyQ1LjZ+RCHp3uVuabBWA5+OJI=
 github.com/prometheus/procfs v0.21.1/go.mod h1:aB55Cww9pdSJVHk0hUf0inxWyyjPogFIjmHKYgMKmtY=
+github.com/rancher/lasso v0.2.9 h1:5Xk9Qid+YDOLpa6s5xalcSR0cA5BMbgWcaOZ8kdNU7k=
+github.com/rancher/lasso v0.2.9/go.mod h1:PMtxoVahRQvhEAi1HVOfyLDe1CrtGwTqOtkPVjSSkns=
 github.com/rancher/system-upgrade-controller/pkg/apis v0.0.0-20260409225933-38f3e11fd1dd h1:lfbqf3ikhATMG4XQnGI23DkNaaxfEDsHzK+FoRxbYVI=
 github.com/rancher/system-upgrade-controller/pkg/apis v0.0.0-20260409225933-38f3e11fd1dd/go.mod h1:SUiQyIpckuP2ZGusrd+avYyt5WTQ9wuvhffw/ukbcrk=
 github.com/rancher/wrangler/v3 v3.7.2 h1:a1lNVgK43TaAnLa/jXk12HeedxO55BpAHD7NNinQnQg=

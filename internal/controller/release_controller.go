@@ -21,11 +21,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/suse/elemental/v3/pkg/manifest/api"
 	"go.yaml.in/yaml/v3"
 	"k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -40,6 +42,7 @@ import (
 	helmv1 "github.com/k3s-io/helm-controller/pkg/apis/helm.cattle.io/v1"
 	upgradecattlev1 "github.com/rancher/system-upgrade-controller/pkg/apis/upgrade.cattle.io/v1"
 	lifecyclev1alpha1 "github.com/suse/elemental-lifecycle-manager/api/v1alpha1"
+	"github.com/suse/elemental-lifecycle-manager/internal/helm"
 	"github.com/suse/elemental-lifecycle-manager/internal/plan"
 	releasecache "github.com/suse/elemental-lifecycle-manager/internal/release"
 	"github.com/suse/elemental-lifecycle-manager/internal/upgrade"
@@ -65,6 +68,9 @@ type ReleaseReconciler struct {
 
 	// ChartVersion is the version of the Elemental Lifecycle Manager chart that this process was deployed from.
 	ChartVersion string
+
+	// HelmClient is used to inspect the Helm releases installed on the cluster.
+	HelmClient helm.Client
 }
 
 // +kubebuilder:rbac:groups=lifecycle.suse.com,resources=releases,verbs=get;list;watch;create;update;patch;delete
@@ -294,26 +300,26 @@ func (r *ReleaseReconciler) prepareAutoUpgradeConfig(ctx context.Context, releas
 		return nil, fmt.Errorf("parsing partial core manifest: %w", err)
 	}
 
-	var helm api.Helm
+	var coreHelm api.Helm
 	for _, c := range core.Components.Helm.Charts {
 		deps := make([]api.HelmChartDependency, 0, len(c.DependsOn))
 		for _, d := range c.DependsOn {
 			deps = append(deps, api.HelmChartDependency{Name: d.Name, Type: api.DependencyType(d.Type)})
 		}
 
-		helm.Charts = append(helm.Charts, &api.HelmChart{
+		coreHelm.Charts = append(coreHelm.Charts, &api.HelmChart{
 			Chart: c.Chart, Repository: c.Repository, Version: c.Version, Values: c.Values, DependsOn: deps,
 		})
 	}
 
 	for _, repo := range core.Components.Helm.Repositories {
-		helm.Repositories = append(helm.Repositories, &api.HelmRepository{Name: repo.Name, URL: repo.URL})
+		coreHelm.Repositories = append(coreHelm.Repositories, &api.HelmRepository{Name: repo.Name, URL: repo.URL})
 	}
 
 	return upgrade.NewSelfUpgradeConfig(
 		types.NamespacedName{Name: release.Name, Namespace: release.Namespace},
 		release.Spec.Version,
-		&helm,
+		&coreHelm,
 		runtimeHelmChartConfigs(release),
 	)
 }
@@ -419,10 +425,71 @@ func (r *ReleaseReconciler) parseUpgradeConfig(ctx context.Context, manifest *re
 		return nil, fmt.Errorf("parsing drain options: %w", err)
 	}
 
+	runtimeCharts := runtimeHelmChartConfigs(release)
+
+	if err := r.handleSUCOwner(ctx, manifest, runtimeCharts); err != nil {
+		return nil, fmt.Errorf("checking whether Rancher manages SUC: %w", err)
+	}
+
 	return upgrade.NewConfig(manifest,
 		release.Spec.Version,
 		types.NamespacedName{Name: release.Name, Namespace: release.Namespace},
-		&upgrade.RuntimeConfig{DrainOpts: opts, HelmCharts: runtimeHelmChartConfigs(release)})
+		&upgrade.RuntimeConfig{DrainOpts: opts, HelmCharts: runtimeCharts})
+}
+
+// handleSUCOwner determines which is the owner of the system-upgrade-controller. If Rancher is deployed, then
+// SUC is dropped from the standard upgrade and configuration approach and all management is left to Rancher.
+// If Rancher is missing, then all management is left to LCM.
+func (r *ReleaseReconciler) handleSUCOwner(ctx context.Context, manifest *resolver.ResolvedManifest,
+	runtimeCharts map[string]upgrade.RuntimeHelmChartConfig) error {
+	const (
+		sucChartName     = "system-upgrade-controller"
+		rancherName      = "rancher"
+		rancherNamespace = "cattle-system"
+	)
+
+	if manifest == nil || manifest.CorePlatform == nil {
+		return nil
+	}
+
+	helmChart := &helmv1.HelmChart{}
+	err := r.Get(ctx, types.NamespacedName{Namespace: reconcilers.HelmChartNamespace, Name: rancherName}, helmChart)
+	switch {
+	case err == nil:
+		// Rancher is not deployed in the supported "cattle-system" namespace, so SUC is kept.
+		if helmChart.Spec.TargetNamespace != rancherNamespace {
+			return nil
+		}
+	case !apierrors.IsNotFound(err):
+		return fmt.Errorf("retrieving %s helm chart: %w", rancherName, err)
+	default:
+		// No HelmChart found for Rancher, check for a Helm release in the supported "cattle-system" namespace.
+		if _, err := r.HelmClient.RetrieveNamespacedRelease(rancherNamespace, rancherName); err != nil {
+			// No Helm release in "cattle-system", hence Rancher is not deployed there and SUC is kept.
+			if errors.Is(err, helm.ErrReleaseNotFound) {
+				return nil
+			}
+			return fmt.Errorf("retrieving %s helm release: %w", rancherName, err)
+		}
+	}
+
+	delete(runtimeCharts, sucChartName)
+
+	helmConfs := []*api.Helm{manifest.CorePlatform.Components.Helm}
+	if s := manifest.SolutionExtension; s != nil && s.Components.Helm != nil {
+		helmConfs = append(helmConfs, s.Components.Helm)
+	}
+
+	for _, h := range helmConfs {
+		h.Charts = slices.DeleteFunc(h.Charts, func(c *api.HelmChart) bool { return c.Chart == sucChartName })
+		for _, c := range h.Charts {
+			if c.Chart == rancherName {
+				c.PriorityUpgrade = true
+			}
+		}
+	}
+
+	return nil
 }
 
 // validateKnownFields reports whether there are Release fields that this LCM version does not support.
