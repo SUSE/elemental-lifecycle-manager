@@ -24,7 +24,8 @@ import (
 // MockHelmClient is a mock implementation of helm.Client for testing.
 // It allows test-specific behavior to be injected via function fields.
 type MockHelmClient struct {
-	RetrieveReleaseFn func(name string) (*helm.ReleaseInfo, error)
+	RetrieveReleaseFn           func(name string) (*helm.ReleaseInfo, error)
+	RetrieveNamespacedReleaseFn func(namespace, name string) (*helm.ReleaseInfo, error)
 }
 
 // RetrieveRelease implements helm.Client interface.
@@ -33,6 +34,16 @@ type MockHelmClient struct {
 func (m *MockHelmClient) RetrieveRelease(name string) (*helm.ReleaseInfo, error) {
 	if m.RetrieveReleaseFn != nil {
 		return m.RetrieveReleaseFn(name)
+	}
+	return nil, helm.ErrReleaseNotFound
+}
+
+// RetrieveNamespacedRelease implements helm.Client interface.
+// If RetrieveNamespacedReleaseFn is set, it delegates to that function.
+// Otherwise, returns ErrReleaseNotFound.
+func (m *MockHelmClient) RetrieveNamespacedRelease(namespace, name string) (*helm.ReleaseInfo, error) {
+	if m.RetrieveNamespacedReleaseFn != nil {
+		return m.RetrieveNamespacedReleaseFn(namespace, name)
 	}
 	return nil, helm.ErrReleaseNotFound
 }
