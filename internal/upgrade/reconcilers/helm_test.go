@@ -155,6 +155,7 @@ var _ = Describe("HelmReconciler", func() {
 				// Define a chart job so that the Job evaluation step of the chart reconciliation succeeds.
 				existing.Status.JobName = testChart1Job
 				Expect(fakeClient.Create(ctx, existing)).To(Succeed())
+				Expect(fakeClient.Create(ctx, testutil.NewTestJob(testChart1Job, reconcilers.HelmChartNamespace, true))).To(Succeed())
 
 				// Define Helm release output for the created HelmChart resource.
 				mockHelm.RetrieveReleaseFn = func(name string) (*helm.ReleaseInfo, error) {
@@ -202,7 +203,7 @@ var _ = Describe("HelmReconciler", func() {
 						// Create an existing HelmChart resource with an existing set of values.
 						existing := testutil.NewTestHelmChartCR(testChart1Name, reconcilers.HelmChartNamespace, testChartVersion)
 						existing.Spec.Values = &apiextensionsv1.JSON{Raw: []byte(existingValues)}
-						// Define a chart job so that the Job evaluation step of the chart reconciliation succeeds.
+						// Point to the Job that ran for the existing spec.
 						existing.Status.JobName = testChart1Job
 						Expect(fakeClient.Create(ctx, existing)).To(Succeed())
 
@@ -236,7 +237,7 @@ var _ = Describe("HelmReconciler", func() {
 						// Create an existing HelmChart resource with an existing set of value secrets.
 						existing := testutil.NewTestHelmChartCR(testChart1Name, reconcilers.HelmChartNamespace, testChartVersion)
 						existing.Spec.ValuesSecrets = existingSecrets
-						// Define a chart job so that the Job evaluation step of the chart reconciliation succeeds.
+						// Point to the Job that ran for the existing spec.
 						existing.Status.JobName = testChart1Job
 						Expect(fakeClient.Create(ctx, existing)).To(Succeed())
 
@@ -271,7 +272,7 @@ var _ = Describe("HelmReconciler", func() {
 
 					// Create an existing HelmChart resource with an older version.
 					existing := testutil.NewTestHelmChartCR(testChart1Name, reconcilers.HelmChartNamespace, "1.0.0")
-					// Define Helm release output for the created HelmChart resource.
+					// Point to the Job that ran for the existing spec.
 					existing.Status.JobName = testChart1Job
 					Expect(fakeClient.Create(ctx, existing)).To(Succeed())
 
@@ -493,17 +494,58 @@ var _ = Describe("HelmReconciler", func() {
 				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
 			})
 
-			It("should handle completed and cleaned up job", func() {
-				// Job completed and was cleaned up - check via conditions
+			It("should handle a missing job as in-progress", func() {
+				// The Helm Controller only deletes a Job to replace it.
 				helmChart.Status.JobName = testChart1Job
 				Expect(fakeClient.Update(ctx, helmChart)).To(Succeed())
-
-				// Job doesn't exist (cleaned up), but no failure condition
 
 				status, err := reconciler.Reconcile(ctx, config)
 
 				Expect(err).NotTo(HaveOccurred())
-				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeSucceeded))
+				Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
+			})
+
+			Context("when a chart upgrade has just been started", func() {
+				var previousVersionJob *batchv1.Job
+
+				BeforeEach(func() {
+					// A completed Job from the installation of version 1.0.0.
+					previousVersionJob = testutil.NewTestJob(testChart1Job, reconcilers.HelmChartNamespace, true)
+					previousVersionJob.UID = "previous-version-job"
+					Expect(fakeClient.Create(ctx, previousVersionJob)).To(Succeed())
+
+					helmChart.Status.JobName = testChart1Job
+					Expect(fakeClient.Update(ctx, helmChart)).To(Succeed())
+
+					// Start the upgrade to version 2.0.0.
+					config = testutil.NewTestConfig(testutil.WithHelmCharts(upgrade.PhaseHelmCharts, []*upgrade.HelmChartConfig{
+						{Chart: testutil.NewTestHelmChart(testChart1Name, "2.0.0")},
+					}))
+
+					// Updates the HelmChart to 2.0.0 and remembers the Job of version 1.0.0.
+					_, err := reconciler.Reconcile(ctx, config)
+					Expect(err).NotTo(HaveOccurred())
+				})
+
+				It("should stay in progress while the Job of the previous version is still present", func() {
+					status, err := reconciler.Reconcile(ctx, config)
+
+					Expect(err).NotTo(HaveOccurred())
+					Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeInProgress))
+				})
+
+				It("should succeed once the Job of the new version completes", func() {
+					Expect(fakeClient.Delete(ctx, previousVersionJob)).To(Succeed())
+
+					newVersionJob := testutil.NewTestJob(testChart1Job, reconcilers.HelmChartNamespace, true)
+					newVersionJob.UID = "new-version-job"
+					Expect(fakeClient.Create(ctx, newVersionJob)).To(Succeed())
+
+					status, err := reconciler.Reconcile(ctx, config)
+
+					Expect(err).NotTo(HaveOccurred())
+					Expect(status.State).To(Equal(lifecyclev1alpha1.UpgradeSucceeded))
+				})
 			})
 
 			DescribeTable("should handle failed job based on upgrade policy",

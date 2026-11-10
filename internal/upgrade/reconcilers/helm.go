@@ -48,6 +48,10 @@ const (
 	// HelmChartNamespace is the namespace where HelmChart resources are created.
 	// The Helm Controller watches for HelmChart resources in this namespace.
 	HelmChartNamespace = "kube-system"
+
+	// previousJobAnnotation holds the UID of the Job the Helm Controller ran for the previous HelmChart spec.
+	// The Helm Controller reuses Job names, so this tells the old Job apart from its replacement.
+	previousJobAnnotation = "lifecycle.suse.com/previous-job-uid"
 )
 
 // chartUpgradeResult holds the result of a chart upgrade attempt.
@@ -245,6 +249,14 @@ func (r *HelmReconciler) updateHelmChart(ctx context.Context, chartConfig *upgra
 	existing.Labels[lifecyclev1alpha1.ReleaseNameLabel] = r.releaseName
 	existing.Labels[lifecyclev1alpha1.ReleaseVersionLabel] = lifecyclev1alpha1.SanitizeVersion(r.releaseVersion)
 
+	if name := existing.Status.JobName; name != "" {
+		job := &batchv1.Job{}
+		if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: HelmChartNamespace}, job); client.IgnoreNotFound(err) != nil {
+			return fmt.Errorf("retrieving current job: %w", err)
+		}
+		metav1.SetMetaDataAnnotation(&existing.ObjectMeta, previousJobAnnotation, string(job.UID))
+	}
+
 	existing.Spec.Version = chart.Version
 	if repoURL.Scheme == "oci" {
 		// HelmChart's referencing OCI images expect the full OCI reference to be
@@ -338,15 +350,17 @@ func (r *HelmReconciler) evaluateHelmChartJobStatus(ctx context.Context, chart *
 		Namespace: HelmChartNamespace,
 	}, job); err != nil {
 		if apierrors.IsNotFound(err) {
-			// Job completed and was cleaned up - check conditions
-			for _, cond := range chart.Status.Conditions {
-				if cond.Type == "Failed" && cond.Status == corev1.ConditionTrue {
-					return helm.ChartStateFailed, nil
-				}
-			}
-			return helm.ChartStateSucceeded, nil
+			// The Helm Controller sets no TTL on its Jobs and only deletes them when they need to be replaced.
+			// A manually deleted job will have the controller recreate the Job, so a missing Job should be
+			// reported as 'InProgress'.
+			return helm.ChartStateInProgress, nil
 		}
 		return helm.ChartStateUnknown, err
+	}
+
+	if uid, ok := chart.Annotations[previousJobAnnotation]; ok && string(job.UID) == uid {
+		// The Job that handled the previous HelmChrat upgrade has not yet been replaced.
+		return helm.ChartStateInProgress, nil
 	}
 
 	// Check job conditions
