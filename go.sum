@@ -218,8 +218,8 @@ github.com/stretchr/testify v1.2.2/go.mod h1:a8OnRcib4nhh0OaRAV+Yts87kKdq0PP7pXf
 github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UVUgZn+9EI=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
-github.com/suse/elemental/v3 v3.1.0-alpha.20261117 h1:zsF5qMbn6hvalH0xE8ElWfAmAsQjtK/Nve9S169xDGc=
-github.com/suse/elemental/v3 v3.1.0-alpha.20261117/go.mod h1:/ADfEsv9Vcxbf/bvDcDno8/HGGrRp72sFAB1/awsPIM=
+github.com/suse/elemental/v3 v3.2.0-alpha.20261124 h1:D3/5t/50GHGnb5QLQa3BHDu5wvrYBgbhd5SNA88IPSs=
+github.com/suse/elemental/v3 v3.2.0-alpha.20261124/go.mod h1:/ADfEsv9Vcxbf/bvDcDno8/HGGrRp72sFAB1/awsPIM=
 github.com/tidwall/gjson v1.18.0 h1:FIDeeyB800efLX89e5a8Y0BNH+LOngJyGrIWxG2FKQY=
 github.com/tidwall/gjson v1.18.0/go.mod h1:/wbyibRr2FHMks5tjHJ5F8dMZh3AcwJEMf5vlfC0lxk=
 github.com/tidwall/match v1.1.1 h1:+Ho715JplO36QYgwN9PGYNhgZvoUSc9X2c80KVTi+GA=
